@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Manga Universal Translator",
+  "version": "1.5",
+  "description": "แปลรูปภาพมังงะผ่านปุ่มสั่งการตรง สเกลเนียนตา ไร้ปัญหาวนลูป",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*/*"
+      ],
+      "js": [
+        "content.script.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}
