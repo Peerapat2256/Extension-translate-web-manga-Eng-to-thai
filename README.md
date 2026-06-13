@@ -1,114 +1,113 @@
-# Manga Universal Translator (English/Korean to Thai) - ภาษาไทย
+# Manga Universal Translator (English/Korean to Thai)
 
-ระบบแปลภาษาหน้าเว็บมังงะ (Manga) จากภาษาอังกฤษและภาษาเกาหลีให้เป็นภาษาไทยโดยอัตโนมัติ ด้วยระบบตรวจจับข้อความอัจฉริยะ (Multi-pass OCR) และแปลผลด้วยปัญญาประดิษฐ์ (AI) ชั้นนำอย่าง Gemini และ Ollama (Local AI) พร้อมรองรับการประมวลผลบนคอมพิวเตอร์หลักเพื่อใช้งานบนโทรศัพท์มือถือ (iOS และ Android) ได้ทันที
+[*คลิกที่นี่สำหรับภาษาไทย (Thai Version) -> README_TH.md*](README_TH.md)
 
----
-
-## 🌟 ฟีเจอร์เด่น (Key Features)
-
-*   **Premium Floating UI:** แถบควบคุมแปลภาษาลอยตัวสไตล์ Glassmorphism สวยงามหรูหรา ปรับเลือกภาษาต้นทาง (อังกฤษ/เกาหลี) และโมเดลที่ต้องการแปลได้จากหน้าจอโดยตรง
-*   **Multi-pass OCR Engine:** การผสานพลังระหว่าง EasyOCR และ PaddleOCR เพื่อความแม่นยำสูงสุดในการตรวจจับข้อความทั้งแนวตั้งและแนวนอน
-*   **Viterbi Word Segmenter & Offline Dictionary:** ระบบแยกคำติดกันและตรวจสะกดอัจฉริยะ แก้ปัญหากล่องข้อความคำปนกันทำให้อ่านไม่รู้เรื่องแบบ 100%
-*   **Advanced AI Translation:** รองรับการเชื่อมต่อแปลภาษาผ่านทาง:
-    *   **Gemini 2.5 Flash API** (แปลได้สละสลวย รวดเร็วและบริบทดีที่สุด)
-    *   **Local AI (Ollama)** เช่น Llama 3 8B, Gemma 2 9B, Qwen 2.5/3 (ฟรี รวดเร็ว ไม่ใช้เน็ต และประมวลผลในเครื่อง)
-    *   **Google Translate Fallback** (ระบบสำรองเมื่อโควตา API หมด)
-*   **Mobile Support:** รองรับการใช้งานแปลมังงะบนมือถือผ่าน Wi-Fi ท้องถิ่น หรือรีโมทผ่านอุโมงค์ HTTPS ปลอดภัย (ngrok) ทั้งระบบปฏิบัติการ Android และ iOS Safari
+An automatic web manga translation system that translates manga pages from English/Korean into Thai directly in your browser. Powered by an intelligent Multi-pass OCR engine and advanced AI translations (Gemini / Local Ollama). Features remote processing support, allowing you to use your computer's GPU/CPU to translate on mobile devices (iOS Safari & Android Kiwi Browser).
 
 ---
 
-## 💻 การติดตั้งและตั้งค่าระบบหลังบ้าน (Backend Setup)
+## 🌟 Key Features
 
-### ความต้องการของระบบ (Prerequisites)
-*   ระบบปฏิบัติการ Windows
-*   Python 3.10 ขึ้นไป (แนะนำ Python 3.11/3.12)
-*   การ์ดจอ NVIDIA ที่รองรับ CUDA (หากต้องการประมวลผลตรวจจับภาพด้วย GPU เพื่อความรวดเร็วสูงสุด)
+*   **Premium Floating UI:** Sleek glassmorphism-styled floating control bar to toggle translation, switch source languages (EN/KO), and select translation models dynamically.
+*   **Multi-pass OCR Engine:** Blends the capabilities of EasyOCR and PaddleOCR to achieve high-accuracy text detection for both vertical and horizontal layouts.
+*   **Viterbi Word Segmenter & Offline Dictionary:** Intelligent word splitter and spelling corrector to fix spacing/tokenization issues and merge words seamlessly.
+*   **Advanced AI Translation:** Supports multiple translation options:
+    *   **Gemini 2.5 Flash API** (Recommended - Best context-aware translations)
+    *   **Local AI (Ollama)** e.g., Llama 3 8B, Gemma 2 9B, Qwen 2.5/3 (Free, private, runs locally)
+    *   **Google Translate Fallback** (Used when API quotas are exhausted)
+*   **Mobile Remote Translation:** Translate on your phone (iOS Safari / Android Kiwi) using your PC as the backend processor via local Wi-Fi or ngrok tunnels.
 
-### ขั้นตอนการเริ่มทำงาน
-1.  **ตั้งค่ารหัส API Key (ไม่บังคับ):**
-    สร้างไฟล์ชื่อ `.env` ไว้ในโฟลเดอร์หลักของโปรเจกต์ และใส่รหัส Gemini API Key ของคุณ:
+---
+
+## 💻 Backend Setup
+
+### One-Click Interactive Setup
+1.  **Configure API Keys (Optional):**
+    Create a file named `.env` in the root folder of the project and add your Gemini API Key:
     ```env
     GEMINI_API_KEY=your_actual_gemini_api_key_here
     ```
-2.  **เริ่มรันเซิร์ฟเวอร์:**
-    ดับเบิลคลิกไฟล์ **`run_backend.bat`** ในโฟลเดอร์หลัก 
-    *   ระบบจะทำการตรวจสอบและดาวน์โหลดไลบรารีที่จำเป็นโดยอัตโนมัติในครั้งแรก (FastAPI, EasyOCR, PaddleOCR, PyThaiNLP ฯลฯ)
-    *   จากนั้นจะเริ่มรันเซิร์ฟเวอร์หลังบ้านขึ้นมาที่สถานะ `http://0.0.0.0:8000`
+2.  **Start the Server with the Intelligent Setup Script:**
+    Double-click **`run_backend.bat`** in the root folder.
+    *   **Automated Toolchain Installer:** If Python 3.11 or other prerequisites are missing from your computer, the launcher script will automatically download and install Python and setup tools silently.
+    *   **Interactive Model Downloader:** During installation, the CMD window will prompt you to select which OCR models (EasyOCR, PaddleOCR, or both) and local AI translation models (Llama 3, Gemma 2, Qwen 2.5, Qwen 3, or skip) you want to download. It will auto-install Ollama and pull your selected models in a single flow.
+    *   Once setup completes, the backend server starts running automatically at `http://0.0.0.0:8000`.
 
 ---
 
-## 🔌 การติดตั้งส่วนขยายบนคอมพิวเตอร์ (PC Extension Setup)
+## 🔌 PC Extension Setup
 
-1.  เปิดเบราว์เซอร์ **Google Chrome** หรือเบราว์เซอร์ Chromium อื่นๆ (เช่น Edge, Brave)
-2.  พิมพ์เข้าไปที่หน้าส่วนขยาย: `chrome://extensions/`
-3.  เปิดใช้งาน **Developer Mode (โหมดนักพัฒนา)** ที่มุมขวาบน
-4.  คลิกปุ่ม **Load unpacked (โหลดส่วนขยายที่แตกโฟลเดอร์แล้ว)** ที่มุมซ้ายบน
-5.  เลือกโฟลเดอร์ชื่อ **`extension`** ในโฟลเดอร์โปรเจกต์นี้
-6.  เข้าหน้าเว็บอ่านการ์ตูนมังงะใดๆ จะพบแถบแปลภาษาลอยตัวขวาล่างแสดงขึ้นมาพร้อมใช้งาน
-
----
-
-## 📱 การติดตั้งและใช้งานบนโทรศัพท์มือถือ (Mobile Devices Setup)
-
-คุณสามารถนำมือถือมาเชื่อมต่อประมวลผลการแปลด้วยคอมพิวเตอร์ของคุณได้ง่ายๆ 2 วิธีตามระบบปฏิบัติการ:
-
-### 🤖 วิธีที่ 1: สำหรับ Android (ผ่าน Kiwi Browser)
-1.  ติดตั้งเบราว์เซอร์ **Kiwi Browser** จาก Play Store ลงในมือถือ
-2.  เปิด Kiwi Browser เข้าไปที่หน้า `chrome://extensions/` แล้วเปิดโหมดนักพัฒนา
-3.  กดติดตั้ง Extension จากโฟลเดอร์หรือไฟล์ `.zip` ของโฟลเดอร์ `extension` 
-4.  เมื่อเข้าหน้าเว็บอ่านการ์ตูน ให้คลิกที่ **ไอคอนรูปเฟือง** บนแถบลอยขวาล่าง
-5.  กรอกที่อยู่ IP คอมพิวเตอร์ของคุณ (ตัวอย่าง: `http://192.168.1.109:8000` - ให้ตรวจเลข IP ของคอมพิวเตอร์ด้วยคำสั่ง `ipconfig` ใน CMD) จากนั้นกดบันทึกแล้วกดแปลได้เลย
+1.  Open **Google Chrome** (or other Chromium-based browsers like Edge, Brave).
+2.  Navigate to the extensions manager page: `chrome://extensions/`.
+3.  Enable **Developer Mode** using the toggle switch in the top-right corner.
+4.  Click **Load unpacked** in the top-left corner.
+5.  Select the **`extension`** folder inside this project directory.
+6.  Open any manga webpage; the premium floating control bar will appear in the bottom-right corner.
 
 ---
 
-### 🍏 วิธีที่ 2: สำหรับ iOS (Safari + แอป Userscripts)
-เนื่องจากระบบความปลอดภัยของ iOS (WebKit) มีการป้องกันที่หนาแน่น จึงต้องใช้งานผ่านแอปช่วยรันสคริปต์แทนการลงส่วนขยายตรงๆ:
+## 📱 Mobile Devices Setup
 
-1.  ดาวน์โหลดแอปฟรีชื่อ **Userscripts** จาก App Store บน iPhone/iPad ของคุณ
-2.  เปิดใช้งานสิทธิ์ส่วนขยายในเครื่องโดยไปที่: `Settings (การตั้งค่า) > Safari > ส่วนขยาย (Extensions) > เลือกเปิดสวิตช์ Userscripts` (และตั้งค่าการเข้าถึงของแอปเป็น **Always Allow** ทุกเว็บไซต์)
-3.  เปิดแอป **Userscripts** (ไอคอนสีส้มบนหน้าจอโฮม) และกดเลือกโฟลเดอร์เก็บไฟล์ในเครื่องผ่านแอป "ไฟล์ (Files)" (เช่น สร้างโฟลเดอร์ชื่อ `Userscripts` ในเครื่อง iPhone)
-4.  บนเบราว์เซอร์ Safari ให้เปิดเข้าไปยัง URL ดาวน์โหลดสคริปต์จากเซิร์ฟเวอร์คอมพิวเตอร์ของคุณโดยตรง:
+You can link your mobile browser to your computer's translation server in two ways:
+
+### 🤖 Method 1: Android (via Kiwi Browser)
+1.  Install **Kiwi Browser** from the Google Play Store on your Android device.
+2.  Open Kiwi Browser, go to `chrome://extensions/`, and enable Developer Mode.
+3.  Install the extension by uploading a `.zip` file of the `extension` folder.
+4.  Open a manga page, tap the **Settings Gear** on the floating control bar.
+5.  Enter your PC's IP address (e.g., `http://192.168.1.109:8000` - find your IP using `ipconfig` in Command Prompt) and tap **Save**.
+
+---
+
+### 🍏 Method 2: iOS (via Safari + Userscripts App)
+Due to iOS security policies (WebKit constraints), local extensions cannot be loaded directly. You must run the translation logic as a Userscript:
+
+1.  Download the free **Userscripts** app from the App Store on your iPhone/iPad.
+2.  Enable the extension: `Settings > Safari > Extensions > enable Userscripts` (set website permissions to **Always Allow**).
+3.  Open the **Userscripts** app (orange icon on the home screen) and select a local directory in the iOS Files app (e.g., create a folder named `Userscripts`).
+4.  Open Safari and navigate to your PC's server address:
     ```text
-    http://<เลขไอพีคอมพิวเตอร์ของคุณ>:8000/manga-translator.user.js
+    http://<YOUR_PC_IP_ADDRESS>:8000/manga-translator.user.js
     ```
-5.  หน้าต่างติดตั้งของแอป Userscripts จะเปิดขึ้นมาให้กดปุ่ม **"Install" (หรือ "บันทึก")** เพื่อเก็บสคริปต์ไว้ใช้งาน
-6.  เมื่อเข้าไปยังหน้าเว็บอ่านการ์ตูนใดๆ ใน Safari แถบเครื่องมือลอยตัวจะแสดงผลขึ้นมาทันที กดรูปเฟืองกรอกที่อยู่ IP คอมพิวเตอร์ของคุณ แล้วกดแปลภาษาได้ทันทีครับ!
+5.  The Userscripts extension installer will pop up. Tap **Install** (or **Save**) to add the script.
+6.  Open a manga website in Safari; the floating control bar will appear in the bottom-right. Tap the **Settings Gear**, enter your PC's IP address (or ngrok HTTPS link), and click Save to start translating!
 
 ---
 
-## 🔒 วิธีแก้ปัญหาความปลอดภัยของ iOS ด้วย "ngrok" (HTTPS Tunnel)
-หากคุณพบปัญหาภาพหายเบลออย่างรวดเร็วและไม่แปลบน iOS Safari เกิดจากระบบความปลอดภัยบล็อกการดึงข้อมูลข้ามโปรโตคอล (Mixed Content จาก HTTPS ไป HTTP) 
+## 🔒 Bypassing iOS Safari Security with "ngrok" (HTTPS Tunnel)
+If the translation unblurs quickly without translating on Safari, it's due to **Mixed Content Blocking** (Safari blocks insecure `http://` fetch requests from secure `https://` webpages).
 
-ให้แก้ไขโดยสร้างลิงก์ปลอดภัย (HTTPS) ผ่านบริการฟรีของ **ngrok** ดังนี้:
+You can solve this easily by tunneling your local server through **ngrok**:
 
-1.  ดาวน์โหลดโปรแกรม **[ngrok สำหรับ Windows](https://ngrok.com/)** และสมัครสมาชิกฟรี
-2.  รันคำสั่งลงทะเบียนคีย์โปรแกรมของคุณ (ตรวจดูโทเค็นได้ในหน้า Dashboard ของเว็บ ngrok):
+1.  Download **[ngrok for Windows](https://ngrok.com/)** and sign up for a free account.
+2.  Configure your authtoken (found on the ngrok dashboard):
     ```bash
-    ngrok config add-authtoken <โทเค็นของคุณ>
+    ngrok config add-authtoken <YOUR_AUTHTOKEN>
     ```
-3.  สั่งเปิดอุโมงค์พอร์ต 8000 ด้วยคำสั่ง:
+3.  Tunnel port 8000 using:
     ```bash
     ngrok http 8000
     ```
-4.  คัดลอกลิงก์ HTTPS ที่ช่อง **Forwarding** (ตัวอย่าง: `https://xxxx.ngrok-free.app`)
-5.  นำลิงก์ดังกล่าวไปใช้ดาวน์โหลดสคริปต์บน iPhone (`https://xxxx.ngrok-free.app/manga-translator.user.js`) และนำไปกรอกลงใน**ช่องตั้งค่ารูปเฟือง**ของแถบลอยตัว เพื่อแปลได้อย่างปลอดภัย 100% (สามารถแปลได้ทุกทีทุกเวลาแม้คุณจะอยู่นอกบ้านก็ตาม)
+4.  Copy the secure **Forwarding** HTTPS URL (e.g., `https://xxxx.ngrok-free.app`).
+5.  On your iPhone/iPad, use this link to download the script (`https://xxxx.ngrok-free.app/manga-translator.user.js`) and paste it in the **Settings Gear** of the floating UI. This allows translating securely anywhere (even outside your home Wi-Fi network).
 
 ---
 
-## 🛠️ โครงสร้างโฟลเดอร์ของโปรเจกต์ (Project Directory Structure)
+## 🛠️ Project Directory Structure
 ```text
 manga-translator/
 ├── backend/
-│   ├── app.py                     # ไฟล์หลักรัน API เซิร์ฟเวอร์หลังบ้าน (FastAPI)
-│   ├── english_words.txt          # คลังคำศัพท์ช่วยจัดระเบียบคำ
-│   └── english_words_large.txt    # คลังคำศัพท์ขนาดใหญ่สำหรับแยกคำกริยา
+│   ├── app.py                     # Main FastAPI server script
+│   ├── english_words.txt          # Word segmenter reference list
+│   └── english_words_large.txt    # Large reference dictionary for verbs/compounds
 ├── extension/
-│   ├── content.script.js          # โค้ดส่วนควบคุมหลักที่ฉีดเข้าไปในหน้าเว็บ
-│   ├── manifest.json              # ไฟล์กำหนดค่าส่วนขยายของเบราว์เซอร์
-│   ├── popup.html                 # หน้าต่าง UI ขนาดเล็กเวลาคลิกไอคอนส่วนขยาย
-│   └── popup.js                   # โค้ดทำงานของป๊อปอัปสั่งแปลตรง
+│   ├── content.script.js          # Injected content script (main translator logic)
+│   ├── manifest.json              # Extension manifest (v3)
+│   ├── popup.html                 # Extension popup interface
+│   └── popup.js                   # Popup execution script
 ├── userscript/
-│   └── manga-translator.user.js   # สคริปต์สำเร็จรูปสำหรับติดตั้งและใช้งานบน Safari iOS
-├── run_backend.bat                # ตัวรันระบบอัตโนมัติสำหรับคอมพิวเตอร์ Windows
-└── README.md                      # คู่มือฉบับนี้
+│   └── manga-translator.user.js   # Tampermonkey userscript for Safari iOS
+├── run_backend.bat                # Automated launcher script for Windows
+├── README_TH.md                   # Thai User Manual
+└── README.md                      # English User Manual (this file)
 ```
