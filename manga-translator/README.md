@@ -21,21 +21,17 @@ An automatic web manga translation system that translates manga pages from Engli
 
 ## 💻 Backend Setup
 
-### Prerequisites
-*   Windows OS
-*   Python 3.10+ (Python 3.11/3.12 recommended)
-*   NVIDIA GPU with CUDA support (Optional, but highly recommended for fast GPU-based OCR)
-
-### How to Run
+### One-Click Interactive Setup
 1.  **Configure API Keys (Optional):**
     Create a file named `.env` in the root folder of the project and add your Gemini API Key:
     ```env
     GEMINI_API_KEY=your_actual_gemini_api_key_here
     ```
-2.  **Start the Server:**
+2.  **Start the Server with the Intelligent Setup Script:**
     Double-click **`run_backend.bat`** in the root folder.
-    *   The script will verify and auto-install all required libraries (FastAPI, EasyOCR, PaddleOCR, PyThaiNLP, etc.) on the first run.
-    *   The server will start listening at `http://0.0.0.0:8000`.
+    *   **Automated Toolchain Installer:** If Python 3.11 or other prerequisites are missing from your computer, the launcher script will automatically download and install Python and setup tools silently.
+    *   **Interactive Model Downloader:** During installation, the CMD window will prompt you to select which OCR models (EasyOCR, PaddleOCR, or both) and local AI translation models (Llama 3, Gemma 2, Qwen 2.5, Qwen 3, or skip) you want to download. It will auto-install Ollama and pull your selected models in a single flow.
+    *   Once setup completes, the backend server starts running automatically at `http://0.0.0.0:8000`.
 
 ---
 
