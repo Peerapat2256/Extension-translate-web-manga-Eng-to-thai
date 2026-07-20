@@ -498,6 +498,9 @@ def fix_ocr_typos(text):
     txt = re.sub(r'\bounc\b', 'our', txt, flags=re.IGNORECASE)
     txt = re.sub(r'\btechniqlie\b', 'technique', txt, flags=re.IGNORECASE)
     txt = re.sub(r'\bletis\b', "let's", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"That'\s*[\$s]\b", "That's", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"that'\s*[\$s]\b", "that's", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'[\$~]+', '', txt)
     txt = re.sub(r'\b4\b', 'a', txt)
 
     # 1. ลบจุดไข่ปลาหรือสัญลักษณ์นำหน้า
@@ -1060,8 +1063,8 @@ def clean_text_in_box(img, x_min, y_min, x_max, y_max, bg_color):
 
 
 def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
-    """⚡ ระบบรวมกล่องข้อความอัจฉริยะแบบไร้ขอบเขต (Iterative Pairwise Box Merger)"""
-    boxes = []
+    """⚡ Smart Speech Bubble Box Clustering & Merger"""
+    raw_items = []
     for bound in bounds:
         points = bound[0]
         text = bound[1]
@@ -1079,14 +1082,9 @@ def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
                                 bool(re.search(r'[\uac00-\ud7a3]', fixed_text)) and
                                 len(fixed_text.strip()) >= 2)
 
-        # ⚡ ปรับเกณฑ์ความมั่นใจ (Confidence) ขั้นต่ำแบบยืดหยุ่นขึ้น
-        # หากมีคำภาษาอังกฤษที่ถูกต้องอย่างน้อย 1 คำ หรือมีคำเกาหลี ให้ลดเกณฑ์ลงมาเพื่อป้องกันคำหล่นหาย
         has_any_valid_text = (valid_word_count >= 1 and english_ratio >= 0.50) or is_valid_sentence_ko
 
-        if is_credit_role or is_valid_sentence_en or has_any_valid_text:
-            min_conf = 0.15
-        else:
-            min_conf = 0.30
+        min_conf = 0.15 if (is_credit_role or is_valid_sentence_en or has_any_valid_text) else 0.30
 
         if confidence < min_conf:
             continue
@@ -1099,157 +1097,95 @@ def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
         x_max = int(max([p[0] for p in points]) * scale_x)
         y_max = int(max([p[1] for p in points]) * scale_y)
 
-        bg_color, text_color = get_background_and_text_color(img, x_min, y_min, x_max, y_max)
+        text_clean = fixed_text.strip()
+        text_clean = re.sub(r"That'\s*[\$s]\b", "That's", text_clean, flags=re.IGNORECASE)
+        text_clean = re.sub(r"that'\s*[\$s]\b", "that's", text_clean, flags=re.IGNORECASE)
+        text_clean = re.sub(r'[\$~]+', '', text_clean).strip()
 
-        boxes.append({
+        if not text_clean:
+            continue
+
+        raw_items.append({
+            "x_min": x_min, "y_min": y_min,
+            "x_max": x_max, "y_max": y_max,
+            "text": text_clean,
+            "conf": confidence
+        })
+
+    if not raw_items:
+        return []
+
+    # Helper function to test if 2 line boxes belong to the same speech bubble
+    def is_same_bubble(b1, b2):
+        y_gap = max(0, max(b1['y_min'], b2['y_min']) - min(b1['y_max'], b2['y_max']))
+        avg_h = ((b1['y_max'] - b1['y_min']) + (b2['y_max'] - b2['y_min'])) / 2
+
+        if y_gap > max(45, avg_h * 2.0):
+            return False
+
+        x_overlap = min(b1['x_max'], b2['x_max']) - max(b1['x_min'], b2['x_min'])
+        w1 = b1['x_max'] - b1['x_min']
+        w2 = b2['x_max'] - b2['x_min']
+        min_w = min(w1, w2)
+
+        if x_overlap < -20:
+            return False
+
+        cx1 = (b1['x_min'] + b1['x_max']) / 2
+        cx2 = (b2['x_min'] + b2['x_max']) / 2
+        if abs(cx1 - cx2) > max(120, min_w * 0.8) and x_overlap < 10:
+            return False
+
+        return True
+
+    n = len(raw_items)
+    parent = list(range(n))
+    def find(i):
+        if parent[i] == i: return i
+        parent[i] = find(parent[i])
+        return parent[i]
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if is_same_bubble(raw_items[i], raw_items[j]):
+                union(i, j)
+
+    clusters = {}
+    for i in range(n):
+        root = find(i)
+        if root not in clusters:
+            clusters[root] = []
+        clusters[root].append(raw_items[i])
+
+    merged_boxes = []
+    for root, bubble_lines in sorted(clusters.items(), key=lambda c: min(b['y_min'] for b in c[1])):
+        bubble_lines.sort(key=lambda b: b['y_min'])
+
+        merged_text = ""
+        for line in bubble_lines:
+            t = line['text']
+            if merged_text.endswith("-"):
+                merged_text = merged_text[:-1] + t
+            elif merged_text:
+                merged_text += " " + t
+            else:
+                merged_text = t
+
+        x_min = min(b['x_min'] for b in bubble_lines)
+        y_min = min(b['y_min'] for b in bubble_lines)
+        x_max = max(b['x_max'] for b in bubble_lines)
+        y_max = max(b['y_max'] for b in bubble_lines)
+
+        merged_boxes.append({
             "x_min": x_min,
             "y_min": y_min,
             "x_max": x_max,
             "y_max": y_max,
-            "bg_color": bg_color,
-            "text_color": text_color,
-            "raw_boxes": [{
-                "x_min": x_min,
-                "y_min": y_min,
-                "x_max": x_max,
-                "y_max": y_max,
-                "text": text,
-                "bg_color": bg_color,
-                "text_color": text_color
-            }]
-        })
-
-    changed = True
-    while changed:
-        changed = False
-        n = len(boxes)
-        for i in range(n):
-            for j in range(i + 1, n):
-                b1 = boxes[i]
-                b2 = boxes[j]
-
-                bg_dist = np.sqrt(sum((c1 - c2)**2 for c1, c2 in zip(b1["bg_color"], b2["bg_color"])))
-                if bg_dist > 50 or is_different_text_color(b1["text_color"], b2["text_color"]):
-                    continue
-
-                y_dist = max(0, max(b1["y_min"], b2["y_min"]) - min(b1["y_max"], b2["y_max"]))
-                lh1 = sum(sb["y_max"] - sb["y_min"] for sb in b1["raw_boxes"]) / len(b1["raw_boxes"])
-                lh2 = sum(sb["y_max"] - sb["y_min"] for sb in b2["raw_boxes"]) / len(b2["raw_boxes"])
-                avg_line_height = (lh1 + lh2) / 2
-
-                dynamic_y_gap = max(15, min(65, int(avg_line_height * 1.3)))
-                x_overlap = min(b1["x_max"], b2["x_max"]) - max(b1["x_min"], b2["x_min"])
-
-                is_mergables = False
-                if y_dist == 0 and x_overlap > -30:
-                    y_center1 = (b1["y_min"] + b1["y_max"]) / 2
-                    y_center2 = (b2["y_min"] + b2["y_max"]) / 2
-                    align_limit = max(8, int(avg_line_height * 0.20))
-                    
-                    aligned = False
-                    if abs(y_center1 - y_center2) <= align_limit:
-                        aligned = True
-                    else:
-                        for sb1 in b1["raw_boxes"]:
-                            c1 = (sb1["y_min"] + sb1["y_max"]) / 2
-                            for sb2 in b2["raw_boxes"]:
-                                c2 = (sb2["y_min"] + sb2["y_max"]) / 2
-                                if abs(c1 - c2) <= align_limit:
-                                    aligned = True
-                                    break
-                            if aligned:
-                                break
-                    if aligned:
-                        is_mergables = True
-                    else:
-                        if x_overlap > 0:
-                            w1 = b1["x_max"] - b1["x_min"]
-                            w2 = b2["x_max"] - b2["x_min"]
-                            overlap_ratio = x_overlap / min(w1, w2)
-                            
-                            x_center1 = (b1["x_min"] + b1["x_max"]) / 2
-                            x_center2 = (b2["x_min"] + b2["x_max"]) / 2
-                            align_thresh = max(35, int(avg_line_height * 1.2))
-                            
-                            is_aligned = (
-                                abs(b1["x_min"] - b2["x_min"]) <= align_thresh or
-                                abs(b1["x_max"] - b2["x_max"]) <= align_thresh or
-                                abs(x_center1 - x_center2) <= align_thresh
-                            )
-                            size_ratio = max(lh1, lh2) / max(1.0, min(lh1, lh2))
-                            
-                            if size_ratio <= 1.40 and overlap_ratio >= 0.35 and is_aligned:
-                                is_mergables = True
-                elif y_dist > 0 and y_dist <= dynamic_y_gap and x_overlap > 0:
-                    w1 = b1["x_max"] - b1["x_min"]
-                    w2 = b2["x_max"] - b2["x_min"]
-                    overlap_ratio = x_overlap / min(w1, w2)
-
-                    x_center1 = (b1["x_min"] + b1["x_max"]) / 2
-                    x_center2 = (b2["x_min"] + b2["x_max"]) / 2
-                    align_thresh = max(35, int(avg_line_height * 1.2))
-
-                    is_aligned = (
-                        abs(b1["x_min"] - b2["x_min"]) <= align_thresh or
-                        abs(b1["x_max"] - b2["x_max"]) <= align_thresh or
-                        abs(x_center1 - x_center2) <= align_thresh
-                    )
-
-                    size_ratio = max(lh1, lh2) / max(1.0, min(lh1, lh2))
-
-                    if size_ratio <= 1.40 and overlap_ratio >= 0.35 and is_aligned:
-                        is_mergables = True
-
-                if is_mergables and y_dist > 0:
-                    y_top = min(b1["y_max"], b2["y_max"])
-                    y_bottom = max(b1["y_min"], b2["y_min"])
-
-                    blocked = False
-                    for k_box in boxes:
-                        if k_box is b1 or k_box is b2:
-                            continue
-                        k_center_y = (k_box["y_min"] + k_box["y_max"]) / 2
-                        if y_top <= k_center_y <= y_bottom:
-                            if is_different_text_color(b1["text_color"], k_box["text_color"]):
-                                blocked = True
-                                break
-                    if blocked:
-                        is_mergables = False
-
-                if is_mergables:
-                    b1["x_min"] = min(b1["x_min"], b2["x_min"])
-                    b1["y_min"] = min(b1["y_min"], b2["y_min"])
-                    b1["x_max"] = max(b1["x_max"], b2["x_max"])
-                    b1["y_max"] = max(b1["y_max"], b2["y_max"])
-
-                    b1["bg_color"] = (
-                        (b1["bg_color"][0] + b2["bg_color"][0]) // 2,
-                        (b1["bg_color"][1] + b2["bg_color"][1]) // 2,
-                        (b1["bg_color"][2] + b2["bg_color"][2]) // 2
-                    )
-                    b1["text_color"] = (
-                        (b1["text_color"][0] + b2["text_color"][0]) // 2,
-                        (b1["text_color"][1] + b2["text_color"][1]) // 2,
-                        (b1["text_color"][2] + b2["text_color"][2]) // 2
-                    )
-                    b1["raw_boxes"].extend(b2["raw_boxes"])
-
-                    boxes.pop(j)
-                    changed = True
-                    break
-            if changed:
-                break
-
-    merged_boxes = []
-    for b in boxes:
-        sorted_sub_boxes = sorted(b["raw_boxes"], key=lambda sb: sb["y_min"])
-        merged_text = " ".join([sb["text"] for sb in sorted_sub_boxes])
-
-        merged_boxes.append({
-            "x_min": b["x_min"],
-            "y_min": b["y_min"],
-            "x_max": b["x_max"],
-            "y_max": b["y_max"],
             "text_eng": merged_text
         })
 
@@ -1691,11 +1627,6 @@ def translate_base64_endpoint(data: MangaRequest):
             scale_x = 1.0
             scale_y = 1.0
 
-        # ⚡ เพิ่มความคมชัด
-        img_ocr = img_ocr.filter(ImageFilter.SHARPEN)
-        enhancer = ImageEnhance.Contrast(img_ocr)
-        img_ocr = enhancer.enhance(1.6)
-
         img_np = np.array(img_ocr)
         t_preprocess = time.time()
 
@@ -1737,16 +1668,19 @@ def translate_base64_endpoint(data: MangaRequest):
 
         # แสดง Log การประมวลผลข้อความใน CMD อย่างเป็นระบบ
         print("\n" + "="*60)
-        print("⚡ [TRANSLATION PROCESS LOG]")
+        print("[+] [TRANSLATION PROCESS LOG]")
         print("="*60)
         for idx, item in enumerate(valid_bounds):
             raw = item["text_eng_raw"].replace('\n', ' ').strip()
             corrected = item["text_eng"].replace('\n', ' ').strip()
             translated = translated_texts[idx] if idx < len(translated_texts) else ""
             print(f"[{idx+1}] ----------------------------------------")
-            print(f"  [OCR Raw]:   {raw}")
-            print(f"  [Corrected]: {corrected}")
-            print(f"  [Translated]: {translated}")
+            try:
+                print(f"  [OCR Raw]:   {raw}")
+                print(f"  [Corrected]: {corrected}")
+                print(f"  [Translated]: {translated}")
+            except Exception:
+                pass
         print("="*60 + "\n")
 
         # 3. ถมกล่องขาวและวาดข้อความภาษาไทย
@@ -1763,7 +1697,7 @@ def translate_base64_endpoint(data: MangaRequest):
             box_width = x_max - x_min
             box_height = y_max - y_min
 
-            # ⚡ ดึงสีพื้นหลังและสีตัวอักษร
+            # ดึงสีพื้นหลังและสีตัวอักษร
             bg_color, text_color = get_background_and_text_color(img, x_min, y_min, x_max, y_max)
 
             # ลบข้อความเดิมด้วย Mask-based eraser
@@ -1811,7 +1745,7 @@ def translate_base64_endpoint(data: MangaRequest):
         d_total = t_encode - t_start
 
         print("\n" + "="*60)
-        print("⚡ [TIMING METRICS]")
+        print("[+] [TIMING METRICS]")
         print("="*60)
         print(f"  - Base64 Decode & Load:      {d_decode:.3f}s")
         print(f"  - Preprocessing & Resizing:  {d_preprocess:.3f}s")

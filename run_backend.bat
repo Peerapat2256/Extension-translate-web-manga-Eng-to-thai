@@ -6,7 +6,7 @@ echo ==================================================
 echo [INFO] MANGA TRANSLATOR SYSTEM LAUNCHER
 echo ==================================================
 
-:: 1. ตรวจสอบว่ามี Python ติดตั้งอยู่ในเครื่องหรือไม่
+REM 1. Check if Python is installed
 where python >nul 2>nul
 if %errorlevel% neq 0 (
     echo [WARNING] ไม่พบ Python ติดตั้งอยู่ในเครื่องระบบของคุณ!
@@ -21,7 +21,6 @@ if %errorlevel% neq 0 (
     "%temp%\python_installer.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
     del "%temp%\python_installer.exe"
     
-    :: รีเฟรช PATH ในเซสชั่นนี้
     set "PATH=%PATH%;%ProgramFiles%\Python311;%ProgramFiles%\Python311\Scripts;%LocalAppData%\Programs\Python\Python311;%LocalAppData%\Programs\Python\Python311\Scripts"
     
     where python >nul 2>nul
@@ -35,7 +34,7 @@ if %errorlevel% neq 0 (
     echo [STATUS] พบ Python ในระบบเรียบร้อย
 )
 
-:: 2. ตรวจสอบและสร้างห้องจำลอง Virtual Environment (venv)
+REM 2. Check and create Python Virtual Environment (venv)
 if not exist "%~dp0venv" (
     echo [STATUS] กำลังสร้างสภาพแวดล้อมจำลอง venv...
     python -m venv "%~dp0venv"
@@ -47,10 +46,10 @@ if not exist "%~dp0venv" (
     echo [SUCCESS] สร้าง venv สำเร็จ
 )
 
-:: 3. ตั้งชื่อไฟล์ลับสำหรับบันทึกสถานะการติดตั้ง
+REM 3. Define installation completion flag file path
 set "FLAG_FILE=%~dp0venv\install_complete_v3.flag"
 
-:: 4. ตรวจสอบสถานะการติดตั้งครั้งแรก
+REM 4. Check if libraries have already been installed
 if exist "!FLAG_FILE!" (
     echo [STATUS] ตรวจสอบระบบเรียบร้อยแล้ว ข้ามการติดตั้งไลบรารี...
     goto :RUN_SERVER
@@ -72,7 +71,7 @@ echo [3/3] กำลังติดตั้งโมดูลตรวจจั
 "%~dp0venv\Scripts\pip.exe" install easyocr --no-deps
 "%~dp0venv\Scripts\pip.exe" install scikit-image shapely pyclipper python-bidi ninja
 
-:: ตรวจสอบการรัน GPU ของ PyTorch เพื่อลง Paddle ให้ตรงรุ่น
+REM Verify if GPU is available to install the correct PaddlePaddle package
 "%~dp0venv\Scripts\python.exe" -c "import torch; print(torch.cuda.is_available())" | findstr "True" >nul
 if %errorlevel% == 0 (
     echo [INFO] ตรวจพบการ์ดจอที่รองรับ CUDA กำลังลงทะเบียนรุ่น GPU สำหรับ Paddle...
@@ -131,7 +130,6 @@ set /p OLLAMA_CHOICE="กรอกตัวเลือก (1-5) [ค่าเ�
 if "!OLLAMA_CHOICE!"=="" set OLLAMA_CHOICE=1
 
 if "!OLLAMA_CHOICE!" neq "1" (
-    :: ตรวจสอบโปรแกรม Ollama
     where ollama >nul 2>nul
     if %errorlevel% neq 0 (
         echo [WARNING] ไม่พบโปรแกรม Ollama ในเครื่องคอมพิวเตอร์ของคุณ!
@@ -143,14 +141,13 @@ if "!OLLAMA_CHOICE!" neq "1" (
         echo [SUCCESS] ติดตั้ง Ollama สำเร็จแล้ว!
     )
     
-    :: ดาวน์โหลดโมเดลตามที่เลือก
     if "!OLLAMA_CHOICE!"=="2" ollama pull llama3:8b
     if "!OLLAMA_CHOICE!"=="3" ollama pull gemma2:9b
     if "!OLLAMA_CHOICE!"=="4" ollama pull qwen2.5:3b
     if "!OLLAMA_CHOICE!"=="5" ollama pull qwen3:8b
 )
 
-:: สร้างไฟล์สัญลักษณ์เมื่อดาวน์โหลดและติดตั้งเสร็จเรียบร้อย
+REM Create flag file to signal completion
 echo. > "!FLAG_FILE!"
 echo.
 echo ==================================================
@@ -161,7 +158,7 @@ echo.
 :RUN_SERVER
 echo [STATUS] กำลังเปิดระบบแปลภาษาเซิร์ฟเวอร์หลังบ้านด้วย GPU (CUDA)...
 echo.
-:: ⚡ สั่งเคลียร์โปรเซสระบบแปลเก่าที่ค้างในพอร์ต 8000
+REM Clear any old server process listening on port 8000
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000') do taskkill /f /pid %%a 2>nul
 "%~dp0venv\Scripts\python.exe" "%~dp0manga-translator\backend\app.py"
 

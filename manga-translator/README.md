@@ -9,7 +9,7 @@ An automatic web manga translation system that translates manga pages from Engli
 ## 🌟 Key Features
 
 *   **Premium Floating UI:** Sleek glassmorphism-styled floating control bar to toggle translation, switch source languages (EN/KO), and select translation models dynamically.
-*   **Multi-pass OCR Engine:** Blends the capabilities of EasyOCR and PaddleOCR to achieve high-accuracy text detection for both vertical and horizontal layouts.
+*   **Smart Speech Bubble Clustering & Multi-pass OCR:** Blends EasyOCR and PP-OCR with graph-based speech bubble clustering to group lines into complete sentences, eliminating broken fragments and noise artifacts (`$`, `~`).
 *   **Viterbi Word Segmenter & Offline Dictionary:** Intelligent word splitter and spelling corrector to fix spacing/tokenization issues and merge words seamlessly.
 *   **Advanced AI Translation:** Supports multiple translation options:
     *   **Gemini 2.5 Flash API** (Recommended - Best context-aware translations)
