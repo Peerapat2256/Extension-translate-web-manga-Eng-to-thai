@@ -320,7 +320,11 @@ def segment_merged_words(text):
         if re.match(r'^[a-zA-Z]+$', t):
             if len(t) >= 7 and t.lower() not in WORDS_FREQ:
                 segmented = segment_english_word(t)
-                segmented_tokens.append(" ".join(segmented))
+                single_letter_count = sum(1 for w in segmented if len(w) == 1 and w.lower() not in {'a', 'i'})
+                if (t.isupper() or t.istitle()) and single_letter_count > 0:
+                    segmented_tokens.append(t)
+                else:
+                    segmented_tokens.append(" ".join(segmented))
             else:
                 segmented_tokens.append(t)
         else:
@@ -1118,9 +1122,13 @@ def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
     # Helper function to test if 2 line boxes belong to the same speech bubble
     def is_same_bubble(b1, b2):
         y_gap = max(0, max(b1['y_min'], b2['y_min']) - min(b1['y_max'], b2['y_max']))
-        avg_h = ((b1['y_max'] - b1['y_min']) + (b2['y_max'] - b2['y_min'])) / 2
+        h1 = b1['y_max'] - b1['y_min']
+        h2 = b2['y_max'] - b2['y_min']
+        avg_h = (h1 + h2) / 2
 
-        if y_gap > max(45, avg_h * 2.0):
+        # Lines inside the same speech bubble have tight line spacing (y_gap <= avg_h * 0.85)
+        max_y_gap = max(18, min(30, int(avg_h * 0.85)))
+        if y_gap > max_y_gap:
             return False
 
         x_overlap = min(b1['x_max'], b2['x_max']) - max(b1['x_min'], b2['x_min'])
@@ -1128,12 +1136,12 @@ def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
         w2 = b2['x_max'] - b2['x_min']
         min_w = min(w1, w2)
 
-        if x_overlap < -20:
+        if x_overlap < -15:
             return False
 
         cx1 = (b1['x_min'] + b1['x_max']) / 2
         cx2 = (b2['x_min'] + b2['x_max']) / 2
-        if abs(cx1 - cx2) > max(120, min_w * 0.8) and x_overlap < 10:
+        if abs(cx1 - cx2) > max(100, min_w * 0.75) and x_overlap < 10:
             return False
 
         return True
