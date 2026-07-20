@@ -45,9 +45,9 @@ if not exist "%PYTHON_EXE%" (
 )
 
 REM 3. Locate backend/app.py
-set "APP_PATH=%~dp0manga-translator\backend\app.py"
+set "APP_PATH=%~dp0backend\app.py"
 if not exist "%APP_PATH%" (
-    set "APP_PATH=%~dp0backend\app.py"
+    set "APP_PATH=%~dp0manga-translator\backend\app.py"
 )
 
 if not exist "%APP_PATH%" (
