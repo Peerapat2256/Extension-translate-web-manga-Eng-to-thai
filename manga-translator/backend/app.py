@@ -604,22 +604,21 @@ def is_valid_text_box(text, source_lang="en"):
         if re.search(r'[\uac00-\ud7a3]', txt):
             return True
     txt = txt.replace('|', 'I')
-    if len(txt) <= 2:
-        words_in_txt = re.findall(r'\b[a-zA-Z]+\b', txt.lower())
-        if not words_in_txt or not all(w in COMMON_ENGLISH_WORDS for w in words_in_txt):
-            return False
-    if txt.isdigit():
-        return False
     if any(credit in txt.upper() for credit in ["CLIRD", "CHAPTER", "SCAN", "DISCORD", "PAGE", "VOLUME"]):
         return False
     words = re.findall(r'\b[a-zA-Z0-9]+\b', txt)
     if not words:
         return False
+    # Always allow numbers and proper names/capitalized words
+    if any(w.isdigit() for w in words):
+        return True
+    if len(words) == 1 and (words[0].isupper() or words[0].istitle()):
+        return True
     valid_word_count = sum(1 for w in words if is_probable_english_word(w))
     english_ratio = valid_word_count / len(words)
     if len(words) <= 2 and valid_word_count == 0:
         return False
-    if english_ratio < 0.40:
+    if english_ratio < 0.35:
         return False
     return True
 
@@ -636,18 +635,23 @@ def clean_text(text, source_lang="en"):
     if source_lang == "en":
         txt = segment_merged_words(txt)
     txt = fix_ocr_typos(txt)
-    if len(txt) <= 2 or txt.isdigit():
+    if not txt:
         return ""
     if any(credit in txt.upper() for credit in ["CLIRD", "CHAPTER", "SCAN", "DISCORD", "PAGE", "VOLUME"]):
         return ""
     words = re.findall(r'\b[a-zA-Z0-9]+\b', txt)
     if not words:
         return ""
+    # Always preserve numbers and single proper names/SFX
+    if any(w.isdigit() for w in words):
+        return txt
+    if len(words) == 1 and (words[0].isupper() or words[0].istitle()):
+        return txt
     valid_word_count = sum(1 for w in words if is_probable_english_word(w))
     english_ratio = valid_word_count / len(words)
     if len(words) <= 2 and valid_word_count == 0:
         return ""
-    if english_ratio < 0.40:
+    if english_ratio < 0.35:
         return ""
     return txt
 
@@ -1055,11 +1059,13 @@ def clean_text_in_box(img, x_min, y_min, x_max, y_max, bg_color):
         mask[:, :border_px] = False
         mask[:, -border_px:] = False
 
-    if mask_pixels > total_pixels * 0.75:
+    bg_lum = (0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b) / 255.0
+    mask_uint8 = (mask * 255).astype(np.uint8)
+
+    if bg_lum > 0.88:
         cleaned_np = box_np.copy()
         cleaned_np[mask] = bg_color
     else:
-        mask_uint8 = (mask * 255).astype(np.uint8)
         cleaned_np = cv2.inpaint(box_np, mask_uint8, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
 
     cleaned_img = Image.fromarray(cleaned_np)
@@ -1725,11 +1731,12 @@ def translate_base64_endpoint(data: MangaRequest):
 
             y_current = y_min + (box_height - total_text_height) // 2
 
+            stroke_color = (0, 0, 0) if text_color == (255, 255, 255) else (255, 255, 255)
             for line in lines:
                 bbox = font.getbbox(line)
                 line_width = bbox[2] - bbox[0]
                 x_current = x_min + (box_width - line_width) // 2
-                draw.text((x_current, y_current), line, fill=text_color, font=font)
+                draw.text((x_current, y_current), line, fill=text_color, font=font, stroke_width=1, stroke_fill=stroke_color)
                 y_current += line_height
 
         t_render = time.time()
