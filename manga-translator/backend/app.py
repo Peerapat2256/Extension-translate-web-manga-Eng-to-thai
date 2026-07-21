@@ -318,6 +318,12 @@ def segment_merged_words(text):
     segmented_tokens = []
     for t in tokens:
         if re.match(r'^[a-zA-Z]+$', t):
+            # Protect known manga names (case-insensitive) from being segmented
+            known_manga_names = {"hinako", "itsuki", "tennoji", "shizune", "karen", "mirei", "konohana", "ojou", "samas", "sama", "san"}
+            if t.lower() in known_manga_names or any(name in t.lower() for name in known_manga_names):
+                segmented_tokens.append(t)
+                continue
+
             if len(t) >= 7 and t.lower() not in WORDS_FREQ:
                 segmented = segment_english_word(t)
                 single_letter_count = sum(1 for w in segmented if len(w) == 1 and w.lower() not in {'a', 'i'})
@@ -514,6 +520,64 @@ def fix_ocr_typos(text):
     txt = re.sub(r'\blone\b', 'long', txt, flags=re.IGNORECASE)
     txt = re.sub(r'[\$~]+', '', txt)
     txt = re.sub(r'\b4\b', 'a', txt)
+
+    # Dictionary corrections for specific manga character names and OCR typos
+    manga_ocr_corrections = {
+        r'\btennolji\b': 'Tennoji',
+        r'\btenno\s+l\s+i\b': 'Tennoji',
+        r'\btennolji\s+san\b': 'Tennoji-san',
+        r'\btenno\s+l\s+i\s+san\b': 'Tennoji-san',
+        r'\bojou[- ]samal\b': 'Ojou-sama',
+        r'\bojol\s+samas\b': 'Ojou-sama',
+        r'\bojou\s+same\b': 'Ojou-sama',
+        r'\bojou\s+sama\b': 'Ojou-sama',
+        r'\bitslki\b': 'Itsuki',
+        r'\bitslki\'s\b': "Itsuki's",
+        r'\bshizlne\b': 'Shizune',
+        r'\bshizlne[- ]san\b': 'Shizune-san',
+        r'\bkagen\s+same\b': 'Karen-sama',
+        r'\bkagen\b': 'Karen',
+        r'\bhinako\'s\b': "Hinako's",
+        r'\bihinako\b': 'Hinako',
+        r'\bihm\b': 'UHM',
+        r'\buh\s+i\s+hi\s+nako\b': 'UHM, Hinako',
+        r'\buh\s+ihinako\b': 'UHM, Hinako',
+        r'\bigack\b': 'back',
+        r'\bsae\b': 'same',
+        r'\bthine\b': 'thing',
+        r'\beertai\b': 'certainly',
+        r'\bcpeasel\b': 'crease',
+        r'\byoupi\b': 'your',
+        r'\bforsaqe\b': 'for some',
+        r'\bandi\b': 'and',
+        r'\bsf\b': 'if',
+        r'\baolnt\s+ceis\b': 'amount is',
+        r'\bcltlery\b': 'cutlery',
+        r'\binwapd\b': 'inward',
+        r'\bimieht\b': 'I might',
+        r'\banxiols\b': 'anxious',
+        r'\bipefore\b': 'before',
+        r'\bigefore\b': 'before',
+        r'\bgeo\s+re\b': 'before',
+        r'\bpidnti\b': "didn't",
+        r'\boefinitelyl\b': 'definitely',
+        r'\btakeei\b': 'take care',
+        r'\btakei\b': 'take care',
+        r'\bpeastless\b': 'restless',
+        r'\bpestless\b': 'restless',
+        r'\bpest\s+less\b': 'restless',
+        r'\blrieht\b': 'alright',
+        r'\balrieht\b': 'alright',
+        r'\bricht\b': 'right',
+        r'\bended\s+lp\b': 'ended up',
+        r'\byoull\b': "you'll",
+        r'\bcollo\b': 'could',
+        r'\bsholdnt\b': "shouldn't",
+        r'\btonolji\b': 'Tennoji',
+        r'\btenoji\b': 'Tennoji',
+    }
+    for pattern, replacement in manga_ocr_corrections.items():
+        txt = re.sub(pattern, replacement, txt, flags=re.IGNORECASE)
 
     # 1. ลบจุดไข่ปลาหรือสัญลักษณ์นำหน้า
     txt = re.sub(r'^[\s.,\-_~;:!?|\\/]+', '', txt)
@@ -1625,10 +1689,20 @@ def translate_base64_endpoint(data: MangaRequest):
             return {"image": translation_cache[image_key]}
 
         try:
-            encoded = data.image_base64
+            encoded = data.image_base64.strip()
+            if encoded.startswith('"') and encoded.endswith('"'):
+                encoded = encoded[1:-1]
             if "," in encoded:
                 encoded = encoded.split(",", 1)[1]
-            image_bytes = base64.b64decode(encoded)
+            encoded = encoded.replace(" ", "+")
+            encoded = re.sub(r'[\s\n\r]+', '', encoded)
+            missing_padding = len(encoded) % 4
+            if missing_padding:
+                encoded += '=' * (4 - missing_padding)
+            try:
+                image_bytes = base64.b64decode(encoded)
+            except Exception:
+                image_bytes = base64.urlsafe_b64decode(encoded)
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         except Exception as img_err:
             print(f"  [Warning] Failed to decode or load base64 image data: {img_err}")
