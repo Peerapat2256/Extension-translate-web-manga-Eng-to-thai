@@ -504,6 +504,14 @@ def fix_ocr_typos(text):
     txt = re.sub(r'\bletis\b', "let's", txt, flags=re.IGNORECASE)
     txt = re.sub(r"That'\s*[\$s]\b", "That's", txt, flags=re.IGNORECASE)
     txt = re.sub(r"that'\s*[\$s]\b", "that's", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\b(aee|are)\s+(yol|you)\b', 'are you', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\b(bxeloeine|bxloine|bxloin|bxeloein)\b', 'exploring', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\b(duneeon|dungeon)\b', 'dungeon', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\b(someihig|someihing)\b', 'something', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\bduo\s+you\b', 'did you', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\buhma\b', 'UHM', txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\bsholldnt\b', "shouldn't", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'\blone\b', 'long', txt, flags=re.IGNORECASE)
     txt = re.sub(r'[\$~]+', '', txt)
     txt = re.sub(r'\b4\b', 'a', txt)
 
@@ -605,6 +613,8 @@ def is_valid_text_box(text, source_lang="en"):
             return True
     txt = txt.replace('|', 'I')
     if any(credit in txt.upper() for credit in ["CLIRD", "CHAPTER", "SCAN", "DISCORD", "PAGE", "VOLUME"]):
+        return False
+    if re.match(r'^[a-zA-Z0-9]\s+[a-zA-Z0-9]$', txt):
         return False
     words = re.findall(r'\b[a-zA-Z0-9]+\b', txt)
     if not words:
@@ -1147,6 +1157,11 @@ def merge_layout_boxes(img, bounds, scale_x=1.0, scale_y=1.0, source_lang="en"):
 
         cx1 = (b1['x_min'] + b1['x_max']) / 2
         cx2 = (b2['x_min'] + b2['x_max']) / 2
+
+        # Separate speech bubble lobes: if centers are shifted horizontally (> 40px) with small overlap (< 45px)
+        if abs(cx1 - cx2) > 40 and x_overlap < 45:
+            return False
+
         if abs(cx1 - cx2) > max(100, min_w * 0.75) and x_overlap < 10:
             return False
 
