@@ -248,6 +248,23 @@ async function translationSupervisorLoop() {
                 continue;
             }
 
+            // รับประกันว่าหน้าที่แปลเสร็จแล้วทั้งหมดแสดงผลรูปแปลเสมอ (ป้องกันเว็บ reader ดึงต้นฉบับมาทับ)
+            for (let i = 0; i < mangaImages.length; i++) {
+                const img = mangaImages[i];
+                if (img.dataset.mangaStatus === "translated") {
+                    const transSrc = img.dataset.translatedSrc || (img.dataset.translatedDataUrl ? base64ToBlobUrl(img.dataset.translatedDataUrl) : null);
+                    if (transSrc && img.src !== transSrc) {
+                        if (img.srcset) {
+                            if (!img.dataset.originalSrcset) img.dataset.originalSrcset = img.srcset;
+                            img.removeAttribute('srcset');
+                        }
+                        isInternalSrcChange = true;
+                        img.src = transSrc;
+                        setTimeout(() => { isInternalSrcChange = false; }, 100);
+                    }
+                }
+            }
+
             // 1. หาตำแหน่งหน้าที่ผู้ใช้อ่านอยู่จริง ณ ขณะนี้ (Viewport Reading Index)
             const currIdx = findCurrentReadingIndex(mangaImages);
 
@@ -334,6 +351,9 @@ async function startSequentialChapterTranslation() {
     window.removeEventListener('scroll', handleReadingScroll);
     window.addEventListener('scroll', handleReadingScroll, { passive: true });
 
+    // คืนรูปแปลทันทีสำหรับหน้าที่เคยแปลเสร็จแล้ว (Instant Fast Switch)
+    updateOverlaysVisibility();
+
     // ตรวจจับเมื่อเว็บโหลดภาพใหม่เข้ามาใน DOM
     if (!domMutationObserver) {
         domMutationObserver = new MutationObserver(() => {
@@ -347,7 +367,7 @@ async function startSequentialChapterTranslation() {
     await translationSupervisorLoop();
 }
 
-// ฟังก์ชันหยุดและกู้คืนรูปต้นฉบับทั้งหมดทันทีเมื่อผู้ใช้กดปิด
+// ฟังก์ชันหยุดและกู้คืนรูปต้นฉบับทั้งหมดทันทีเมื่อผู้ใช้กดปิด (ดูต้นฉบับ)
 function stopSequentialChapterTranslation() {
     window.removeEventListener('scroll', handleReadingScroll);
     if (domMutationObserver) {
@@ -358,20 +378,18 @@ function stopSequentialChapterTranslation() {
     clearTimeout(scrollDebounceTimer);
     wakeSupervisor();
     
-    const images = document.querySelectorAll('img');
-    images.forEach(img => {
-        img.style.filter = "none";
-        const original = img.dataset.originalBlobUrl || img.dataset.originalDataUrl || img.dataset.originalSrc;
-        if (original && img.src !== original) {
-            isInternalSrcChange = true;
-            img.src = original;
-            setTimeout(() => { isInternalSrcChange = false; }, 100);
-        }
-    });
+    // สลับทุกรูปกลับเป็นต้นฉบับทันที
+    updateOverlaysVisibility();
 
     const textSpan = document.querySelector('#manga-translator-btn span:last-child');
     if (textSpan) {
-        textSpan.innerText = 'แปลหน้านี้ (Translate Page)';
+        const mangaImages = getSortedMangaImages();
+        const translatedCount = mangaImages.filter(img => img.dataset.mangaStatus === "translated").length;
+        if (translatedCount > 0) {
+            textSpan.innerText = `ดูแบบแปล (แปลแล้ว ${translatedCount}/${mangaImages.length} หน้า)`;
+        } else {
+            textSpan.innerText = 'แปลหน้านี้ (Translate Page)';
+        }
     }
 }
 
@@ -1154,6 +1172,7 @@ function createToggleUI() {
     button.addEventListener('click', () => {
         isTranslationEnabled = !isTranslationEnabled;
         updateUIState();
+        updateOverlaysVisibility();
         
         if (isTranslationEnabled) {
             startSequentialChapterTranslation();
@@ -1230,7 +1249,13 @@ function createToggleUI() {
             button.style.background = 'transparent';
             button.style.border = '1px solid transparent';
             button.style.boxShadow = 'none';
-            textSpan.innerText = 'แปลหน้านี้ (Translate Page)';
+            const mangaImages = getSortedMangaImages();
+            const translatedCount = mangaImages.filter(img => img.dataset.mangaStatus === "translated").length;
+            if (translatedCount > 0) {
+                textSpan.innerText = `ดูแบบแปล (แปลแล้ว ${translatedCount}/${mangaImages.length} หน้า)`;
+            } else {
+                textSpan.innerText = 'แปลหน้านี้ (Translate Page)';
+            }
         }
         updateCollapsedIndicator();
     }
@@ -1560,12 +1585,18 @@ async function startSingleImageTranslation(img) {
         }
         
         if (data && data.image) {
-            // แปลง base64 ที่ได้รับจากเซิร์ฟเวอร์เป็น blob URL ชั่วคราวฝั่งเบราว์เซอร์
             const blobUrl = base64ToBlobUrl(data.image);
             img.dataset.translatedSrc = blobUrl;
+            img.dataset.translatedDataUrl = data.image;
             img.dataset.mangaStatus = "translated";
-            img.style.filter = "none"; // เอาเอฟเฟกต์เบลอออกเมื่อแปลผลเรียบร้อย
+            img.style.filter = "none";
             
+            // สำรองและถอด srcset เดิมออกเพื่อไม่ให้เบราว์เซอร์บังคับใช้ภาพต้นฉบับ
+            if (img.srcset) {
+                if (!img.dataset.originalSrcset) img.dataset.originalSrcset = img.srcset;
+                img.removeAttribute('srcset');
+            }
+
             // เปลี่ยนรูปในหน้าจอหากผู้ใช้เปิดใช้งานการแปล
             if (isTranslationEnabled) {
                 isInternalSrcChange = true;
@@ -1602,23 +1633,39 @@ async function startSingleImageTranslation(img) {
     }
 }
 
-// 4. ฟังก์ชันควบคุมการแสดงผลตามสถานะเปิด/ปิด
+// 4. ฟังก์ชันควบคุมการแสดงผลตามสถานะเปิด/ปิด (สลับระหว่างต้นฉบับกับแบบแปลทันที)
 function updateOverlaysVisibility() {
     isInternalSrcChange = true;
     try {
         const images = document.querySelectorAll('img');
         images.forEach(img => {
-            const hasTranslated = img.dataset.mangaStatus === "translated" || Boolean(img.dataset.translatedSrc);
+            const hasTranslated = (img.dataset.mangaStatus === "translated") || Boolean(img.dataset.translatedSrc) || Boolean(img.dataset.translatedDataUrl);
             if (hasTranslated) {
                 if (isTranslationEnabled) {
-                    if (img.dataset.translatedSrc && img.src !== img.dataset.translatedSrc) {
-                        img.src = img.dataset.translatedSrc;
+                    let transSrc = img.dataset.translatedSrc;
+                    if (!transSrc && img.dataset.translatedDataUrl) {
+                        transSrc = base64ToBlobUrl(img.dataset.translatedDataUrl);
+                        img.dataset.translatedSrc = transSrc;
                     }
+                    if (transSrc) {
+                        if (img.srcset) {
+                            if (!img.dataset.originalSrcset) img.dataset.originalSrcset = img.srcset;
+                            img.removeAttribute('srcset');
+                        }
+                        if (img.src !== transSrc) {
+                            img.src = transSrc;
+                        }
+                    }
+                    img.style.filter = "none";
                 } else {
                     const original = img.dataset.originalBlobUrl || img.dataset.originalDataUrl || img.dataset.originalSrc;
                     if (original && img.src !== original) {
                         img.src = original;
                     }
+                    if (img.dataset.originalSrcset && !img.srcset) {
+                        img.srcset = img.dataset.originalSrcset;
+                    }
+                    img.style.filter = "none";
                 }
             }
             if (!isTranslationEnabled) {
@@ -1628,9 +1675,14 @@ function updateOverlaysVisibility() {
                     if (original && img.src !== original) {
                         img.src = original;
                     }
+                    if (img.dataset.originalSrcset && !img.srcset) {
+                        img.srcset = img.dataset.originalSrcset;
+                    }
                 }
             }
         });
+    } catch (err) {
+        console.error('[Manga Translator] updateOverlaysVisibility error:', err);
     } finally {
         setTimeout(() => { isInternalSrcChange = false; }, 200);
     }
