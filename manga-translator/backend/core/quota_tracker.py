@@ -5,11 +5,11 @@ import threading
 from datetime import datetime
 
 CASCADE_MODELS_DEF = [
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "daily_limit": 1500, "tier": "Smartest"},
-    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "daily_limit": 1500, "tier": "Balanced & Fast"},
-    {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash-Lite", "daily_limit": 1500, "tier": "Ultra Fast"},
-    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "daily_limit": 1500, "tier": "Classic Stable"},
-    {"id": "gemini-1.5-flash-8b", "name": "Gemini 1.5 Flash-8B", "daily_limit": 1500, "tier": "Lightweight"}
+    {"id": "gemini-flash-latest", "name": "Gemini Flash (Latest)", "daily_limit": 1500, "tier": "Smartest & Fast"},
+    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash", "daily_limit": 1500, "tier": "Next-Gen Flash"},
+    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash", "daily_limit": 1500, "tier": "High Intelligence"},
+    {"id": "gemini-flash-lite-latest", "name": "Gemini Flash-Lite (Latest)", "daily_limit": 1500, "tier": "Ultra Fast (0.7s)"},
+    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash-Lite", "daily_limit": 1500, "tier": "Fast Backup"}
 ]
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -57,6 +57,14 @@ class GeminiQuotaTracker:
         if "models" not in self.data:
             self.data["models"] = {}
             modified = True
+        
+        # Remove deprecated model IDs no longer in CASCADE_MODELS_DEF
+        active_ids = {m["id"] for m in CASCADE_MODELS_DEF}
+        for old_id in list(self.data["models"].keys()):
+            if old_id not in active_ids:
+                del self.data["models"][old_id]
+                modified = True
+
         for m in CASCADE_MODELS_DEF:
             mid = m["id"]
             if mid not in self.data["models"]:
