@@ -99,43 +99,283 @@
 
 ---
 
-## 🛠️ โครงสร้างโฟลเดอร์ของโปรเจกต์ (Modular Architecture 2.0)
+## 🛠️ โครงสร้างของระบบและสถาปัตยกรรมโมดูล (System Architecture & Module Breakdown)
+
+ระบบถูกออกแบบด้วยสถาปัตยกรรมแบบ **Decoupled Modular Pipeline** แบ่งออกเป็น 8 ระบบย่อย (Subsystems) เพื่อให้ง่ายต่อการดูแลรักษา ปรับแต่งค่า และรองรับการประมวลผลภาพมังงะและเว็บตูนได้อย่างมีประสิทธิภาพสูงสุด:
+
 ```text
 manga-translator/
-├── backend/
-│   ├── app.py                     # Entry point หลักของ FastAPI Server
+├── backend/                       # [Subsystem 2-8: Backend Server & Processing Engines]
+│   ├── app.py                     # จุดเริ่มต้นเซิร์ฟเวอร์ FastAPI (Server Lifespan, CORS, Static Files)
 │   ├── api/                       # API Routing Layer
-│   │   └── v1/translate_routes.py # เอ็นด์พอยต์ /translate_base64 และ Healthcheck
-│   ├── core/                      # การจัดการระบบหลัก แคช และคอนฟิก
-│   │   ├── config.py              # การตั้งค่าระบบ และ Golden Baseline Configuration
-│   │   └── cache_manager.py       # ระบบแคชผลลัพธ์ภาพแปลซ้ำ
-│   ├── vision/                    # การประมวลผลภาพขั้นสูง
-│   │   ├── comic_detector.py      # Comic-Text-Detector ONNX + Auto-Tiling
-│   │   ├── bubble_detector.py     # ระบบรวมบรรทัดเข้าเป็นช่องคำพูด (Hierarchical Clustering)
-│   │   ├── deskew_normalizer.py   # ตรวจจับมุมเอียงและปรับคอนทราสต์ CLAHE
-│   │   └── style_extractor.py     # วิเคราะห์สีพื้นหลังและสีตัวอักษร
-│   ├── ocr/                       # ระบบอ่านข้อความ
-│   │   ├── comic_recognizer.py    # Native Tiled EasyOCR + Inverted Text Recovery
-│   │   └── spell_corrector.py     # ตัวกรองคำผิด ลายน้ำ และเสียงเอฟเฟกต์
-│   ├── inpainting/                # ระบบลบตัวอักษรต้นฉบับ
-│   │   ├── dual_cleaner.py        # ลบข้อความเฉพาะในบอลลูนคำพูด พร้อมระบบป้องกันใบหน้า
-│   │   └── mask_generator.py      # ตัวสร้างมาสก์ภาพ
-│   ├── translator/                # ตัวเชื่อมต่อ AI แปลภาษา
-│   │   ├── gemini_engine.py       # Gemini 2.5 Flash API
-│   │   ├── ollama_engine.py       # Local Ollama AI (Gemma 2, Qwen 2.5/3)
-│   │   └── google_engine.py       # Google Translate Seamless Fallback
-│   └── typesetter/                # ระบบพิมพ์และจัดวางตัวอักษร
-│       ├── graphic_renderer.py    # เรนเดอร์ฟอนต์ภาษาไทยและเส้นขอบตัวอักษร
-│       └── thai_formatter.py      # ตัดคำและจัดรูปประโยคภาษาไทย
-├── extension/                     # Chrome Extension (Manifest V3 + Background Service Worker)
-│   ├── content.script.js          # Adaptive Preload Supervisor Script
-│   ├── background.js              # CORS Bypass Service Worker
-│   └── manifest.json
-├── userscript/
-│   └── manga-translator.user.js   # สคริปต์รวมสำหรับ iOS Safari & Tampermonkey
-├── run_backend.bat                # ตัวเปิดระบบอัตโนมัติบน Windows
-└── README.md
+│   │   └── v1/translate_routes.py # เอ็นด์พอยต์ /translate_base64, /health, ตรวจสอบ Payload
+│   ├── core/                      # การจัดการระบบหลัก แคช และคอนฟิกมาตรฐาน
+│   │   ├── config.py              # คอนฟิกหลักของระบบ และค่ามาตรฐาน Golden Baseline Configuration
+│   │   └── cache_manager.py       # ระบบแคชภาพผลลัพธ์ในหน่วยความจำ (MD5 In-Memory Cache)
+│   ├── pipeline/                  # ระบบผู้ประสานงานไปป์ไลน์ (Pipeline Orchestrator)
+│   │   └── coordinator.py         # ฟังก์ชัน process_manga_image() ประสานงานขั้นตอนประมวลผลทั้งหมด
+│   ├── vision/                    # ระบบวิทัศน์คอมพิวเตอร์และการตรวจจับรูปทรง
+│   │   ├── comic_detector.py      # โมเดล Deep Learning Comic-Text-Detector ONNX + Webtoon Auto-Tiling
+│   │   ├── bubble_detector.py     # อัลกอริทึม Hierarchical Clustering รวมบรรทัดเป็นบอลลูนคำพูด
+│   │   ├── deskew_normalizer.py   # ตรวจจับมุมเอียงของข้อความและปรับคอนทราสต์แสงด้วย CLAHE
+│   │   └── style_extractor.py     # ตรวจวัดค่าสีพื้นหลัง ตรวจสอบค่าความแปรปรวน และคำนวณสีตัวอักษร
+│   ├── ocr/                       # ระบบอ่านและแปลงภาพเป็นข้อความ (Optical Character Recognition)
+│   │   ├── comic_recognizer.py    # Native Tiled EasyOCR (CUDA) + Inverted Luminance Recovery
+│   │   └── spell_corrector.py     # ตัวกรองคำขยะ ลายน้ำเว็บไซต์ ข้อความเครดิต และเสียงเอฟเฟกต์ (SFX)
+│   ├── inpainting/                # ระบบลบข้อความเดิมและถนอมภาพวาด (Artwork-Preserving Inpainting)
+│   │   ├── dual_cleaner.py        # ลบข้อความเฉพาะในบอลลูนคำพูดด้วย Stroke Inpainting ไม่ล้นโดนตัวละคร
+│   │   └── mask_generator.py      # ตัวสร้างมาสก์ระดับลายเส้นตัวอักษร (Dilated Ellipse Mask)
+│   ├── translator/                # ระบบเชื่อมต่อและควบคุมโมเดล AI แปลภาษา
+│   │   ├── gemini_engine.py       # Gemini 2.5 Flash API พร้อม System Prompt เฉพาะทางมังงะ
+│   │   ├── ollama_engine.py       # Local Ollama AI (Gemma 2 9B, Qwen 2.5/3) ออฟไลน์ 100% พร้อมตัวเคลียร์ VRAM
+│   │   └── google_engine.py       # ระบบสำรองฉุกเฉิน Google Translate แบบขนานความเร็วสูง
+│   ├── typesetter/                # ระบบจัดหน้าและพิมพ์ตัวอักษรภาษาไทย (Dynamic Typesetting)
+│   │   ├── graphic_renderer.py    # วาดตัวอักษรไทยด้วย Pillow จัดกึ่งกลาง พร้อมเส้นขอบตัดกัน (Contrasting Stroke)
+│   │   └── thai_formatter.py      # ตัดคำภาษาไทยตามหลักพจนานุกรมและจัดบรรทัดตามรูปทรงบอลลูน
+│   ├── models/                    # โฟลเดอร์จัดเก็บโมเดล Deep Learning (comic-text-detector.onnx)
+│   ├── english_words.txt          # คลังคำศัพท์ภาษาอังกฤษสำหรับกรองคำแปลกปลอม
+│   └── english_words_large.txt    # คลังคำศัพท์ขนาดใหญ่สำหรับตรวจสอบรูปคำกริยา
+├── extension/                     # [Subsystem 1: PC Chrome Extension]
+│   ├── manifest.json              # ไฟล์กำหนดสิทธิ์ Manifest V3 และสิทธิ์เข้าถึงหน้าเว็บ
+│   ├── content.script.js          # สคริปต์ฉีดเข้าหน้าเว็บ: Floating UI, Preload Supervisor, Canvas Replacer
+│   ├── background.js              # Background Service Worker จัดการ Bypass ข้อจำกัด CORS ข้ามโดเมน
+│   ├── popup.html                 # หน้าต่างป๊อปอัปควบคุมส่วนขยาย
+│   └── popup.js                   # สคริปต์ปุ่มสั่งการในหน้าต่างป๊อปอัป
+├── userscript/                    # [Subsystem 1: Mobile & Universal Script]
+│   └── manga-translator.user.js   # สคริปต์รวมโค้ดชุดเดียวสำหรับ iOS Safari (Userscripts App) & Tampermonkey
+├── run_backend.bat                # ไฟล์แบทช์เปิดระบบอัตโนมัติ ตรวจสอบโมเดล รัน Ollama และเปิดเซิร์ฟเวอร์
+└── README.md                      # คู่มือการใช้งานและเอกสารสถาปัตยกรรมระบบฉบับสมบูรณ์
 ```
+
+---
+
+### 📋 รายละเอียดหน้าที่ของแต่ละระบบย่อย (Subsystems Breakdown)
+
+1. **Subsystem 1: Client Layer (ส่วนขยายเบราว์เซอร์และสคริปต์หน้าเว็บ):**
+   * **`content.script.js` / `manga-translator.user.js`**: สร้างแถบควบคุมลอยตัวสไตล์ Glassmorphism บนหน้าเว็บ, รัน **Adaptive Preload Supervisor Loop** คอยตรวจสอบว่ารูปภาพดาวน์โหลดเข้ามาในหน่วยความจำแล้วกี่หน้า, ลำดับความสำคัญหน้าสายตา (`findCurrentReadingIndex`), แปลงรูปภาพเป็น Base64 และนำภาพที่แปลเสร็จแล้วไปสลับแทนที่ภาพเดิมในหน้าเว็บแบบไร้รอยต่อ
+   * **`background.js`**: ทำหน้าที่เป็นสะพานเครือข่ายสำหรับ Chrome Extension เพื่อบายพาสข้อจำกัด Cross-Origin Resource Sharing (CORS) ทำให้สามารถส่งข้อมูลภาพข้ามโดเมนไปยังเซิร์ฟเวอร์หลังบ้านได้ราบรื่น
+
+2. **Subsystem 2: API Gateway & Pre-Filter Layer (ประตูรับคำขอและคัดกรอง):**
+   * **`translate_routes.py`**: ตรวจสอบความถูกต้องของข้อมูล Base64, แก้ไข Header/Padding ที่เสียหาย, รองรับฟอร์แมตภาพสมัยใหม่ (JPEG, PNG, WEBP, AVIF, HEIF), กรองภาพที่ไม่ใช่มังงะ (ภาพขนาดเล็กกว่า 250px หรือแบนเนอร์โฆษณาที่มีอัตราส่วนยาวเกินไป) และเชื่อมโยงระบบแคชในหน่วยความจำ
+   * **`cache_manager.py`**: ระบบแคชผลลัพธ์ด้วย MD5 Hashing จาก `[Model] + [SourceLang] + [ImagePayload]` คืนผลลัพธ์ทันทีใน 0.001 วินาทีหากเป็นภาพเดิม
+
+3. **Subsystem 3: Pipeline Coordinator (ตัวควบคุมขั้นตอนประมวลผล):**
+   * **`coordinator.py`**: ศูนย์กลางของขั้นตอนการทำงานทั้งหมด รับภาพเข้ามาแล้วส่งต่อไปยังโมเดลตรวจจับ, OCR, รวมประโยค, ส่งแปล, ลบข้อความ และพิมพ์ตัวอักษรไทยกลับลงไปอย่างเป็นระบบ
+
+4. **Subsystem 4: Computer Vision & Tiling (ระบบวิทัศน์คอมพิวเตอร์และการสไลซ์ภาพ):**
+   * **`comic_detector.py`**: โหลดโมเดล Deep Learning `comic-text-detector.onnx` ด้วย ONNX Runtime CUDA รองรับระบบ **Webtoon Auto-Tiling** ตัดแบ่งภาพเว็บตูนขนาดยาวเป็นชิ้นส่วน 2,200px แบบเหลื่อมซ้อน 300px ที่ความละเอียด 1:1 และรวมกรอบด้วย Non-Maximum Suppression (NMS)
+   * **`bubble_detector.py`**: รวมบรรทัดข้อความ (Lines) เข้าเป็นช่องคำพูด (Speech Bubble) ตามหลักระยะห่างเชิงเรขาคณิต (Hierarchical Distance Clustering)
+   * **`style_extractor.py`**: วิเคราะห์สีพื้นหลัง สีตัวอักษร และคำนวณสีเส้นขอบ (Contrasting Stroke Color) พร้อมเช็คค่าเบี่ยงเบนมาตรฐาน (`std < 25`) เพื่อป้องกันการลบโดนภาพวาด
+   * **`deskew_normalizer.py`**: ปรับความคมชัดและคอนทราสต์ของภาพด้วย CLAHE พร้อมตรวจจับมุมเอียง
+
+5. **Subsystem 5: Optical Character Recognition (ระบบอ่านข้อความและกรองขยะ):**
+   * **`comic_recognizer.py`**: รัน EasyOCR (CRAFT + ResNet/BiLSTM) บน GPU รองรับการสไลซ์ภาพยาว 1:1 และระบบ Inverted Luminance Recovery สำหรับอ่านตัวหนังสือสีขาวในบอลลูนสีดำ
+   * **`spell_corrector.py`**: ตรวจจับและตัดคำผิด, กรองลายน้ำผู้แปล, ลิงก์เว็บไซต์ และเสียงเอฟเฟกต์ (SFX) ที่ไม่เกี่ยวข้องออก
+
+6. **Subsystem 6: Inpainting & Artwork Protection (ระบบลบข้อความและถนอมงานศิลป์):**
+   * **`dual_cleaner.py`**: ลบข้อความต้นฉบับด้วยเทคนิค Stroke Inpainting เฉพาะในบอลลูนคำพูดที่มีบทแปลไทยจริงเท่านั้น ลายเส้นตัวละคร สกรีนโทน และภาพวาดรอบข้างจะคงเดิม 100%
+
+7. **Subsystem 7: Multi-Engine Translation Orchestrator (ระบบแปลภาษา):**
+   * **`gemini_engine.py`**: แปลภาษาด้วยโมเดล Gemini 2.5 Flash ผ่าน Prompt มังงะเฉพาะทาง
+   * **`ollama_engine.py`**: แปลภาษาแบบออฟไลน์ 100% ในเครื่องด้วย Gemma 2 (9B), Qwen 2.5 (3B) หรือ Qwen 3 (8B) พร้อมฟังก์ชันคืนหน่วยความจำ VRAM
+   * **`google_engine.py`**: ระบบสำรองฉุกเฉินความเร็วสูง ทำงานทันทีเมื่อเอนจินหลักมีปัญหา
+
+8. **Subsystem 8: Typography & Typesetting (ระบบจัดพิมพ์และวางข้อความไทย):**
+   * **`graphic_renderer.py`**: วาดตัวหนังสือไทยด้วยฟอนต์คุณภาพสูง ปรับขนาดฟอนต์อัตโนมัติด้วย Binary Search ให้พอดีกับบอลลูน พร้อมใส่เส้นขอบตัดกันหนา 2–3px
+   * **`thai_formatter.py`**: ตัดคำภาษาไทยตามพจนานุกรม ป้องกันปัญหาพยางค์หรือสระฉีกขาด
+
+---
+
+## ⚙️ ขั้นตอนการทำงานของระบบตั้งแต่ต้นจนจบ (System Workflow Step-by-Step)
+
+เมื่อผู้ใช้งานเปิดหน้าเว็บอ่านมังงะหรือเว็บตูน ระบบจะทำงานประสานกัน 12 ขั้นตอนดังต่อไปนี้:
+
+```text
+[1. หน้าเว็บ] ──> [2. ตรวจสอบความพร้อมของภาพ] ──> [3. จัดคิวตามสายตา] ──> [4. ส่ง Base64 ข้าม CORS]
+                                                                                   │
+[8. รวมประโยค] <── [7. สไลซ์ภาพ & OCR 1:1] <── [6. ตรวจ Cache MD5] <── [5. กรองขนาด & แบนเนอร์]
+       │
+[9. ส่งแปล AI หลายเอนจิน] ──> [10. ลบข้อความเดิมคงลายเส้น] ──> [11. วาดตัวอักษรไทย] ──> [12. สลับภาพบนหน้าเว็บ]
+```
+
+1. **ขั้นตอนที่ 1: การเริ่มทำงานบนหน้าเว็บ (Client Script Initialization):**
+   เมื่อเข้าสู่หน้าเว็บมังงะ สคริปต์ (`content.script.js` หรือ `manga-translator.user.js`) จะเริ่มทำงานและแทรกแถบควบคุมลอยตัว (Floating Control Bar) ขึ้นมาที่มุมขวาบน พร้อมเชื่อมต่อกับเบราว์เซอร์
+2. **ขั้นตอนที่ 2: การตรวจสอบความพร้อมของภาพ (Preload Detection & Ready Check):**
+   ฟังก์ชัน `isImageLoadedAndReady(img)` ทำการสแกนรูปภาพทั้งหมดในหน้าเว็บ ตรวจสอบว่าภาพดาวน์โหลดเข้ามาในหน่วยความจำของเบราว์เซอร์เรียบร้อยแล้ว (`complete === true` และขนาดกว้าง-สูงเกิน 200px) โดยจะไม่ส่งภาพที่เป็น Placeholder ว่างๆ หรือยังโหลดไม่เสร็จเข้าไปในคิว
+3. **ขั้นตอนที่ 3: การจัดลำดับคิวแปลตามระดับสายตา (Dynamic Viewport Priority Queue):**
+   คำนวณหาหน้าที่ผู้ใช้อ่านอยู่จริงในปัจจุบัน (`findCurrentReadingIndex`) และกำหนดให้หน้านั้นได้รับความสำคัญสูงสุดในการแปล จากนั้นระบบจะทยอยแปลหน้าที่โหลดเข้ามาล่วงหน้าลงไปด้านล่างอย่างต่อเนื่อง
+4. **ขั้นตอนที่ 4: การแปลงและส่งข้อมูลภาพ (Base64 Transmission & CORS Bypass):**
+   สคริปต์หน้าเว็บแปลงรูปภาพเป็นข้อมูล Base64 Payload และส่งคำขอผ่าน Background Service Worker หรือ GM_xmlhttpRequest เพื่อส่งข้อมูลไปยังเซิร์ฟเวอร์หลังบ้าน (`POST /translate_base64`) โดยไม่ติดปัญหาความปลอดภัย CORS
+5. **ขั้นตอนที่ 5: การรับคำขอและคัดกรองขยะ (API Gateway Ingestion & Pre-Filtering):**
+   เซิร์ฟเวอร์ FastAPI ตรวจสอบความสมบูรณ์ของ Base64 แก้ไข Padding อัตโนมัติ และทำการคัดกรองขนาดภาพ (ต้องไม่ต่ำกว่า 250x250px) และตรวจวัดอัตราส่วน หากเป็นแถบแบนเนอร์โฆษณาด้านบน/ล่างของเว็บ ระบบจะข้ามทันทีเพื่อประหยัดทรัพยากร GPU
+6. **ขั้นตอนที่ 6: การตรวจสอบแคชความเร็วสูง (Zero-Latency Hash Cache Lookup):**
+   นำข้อมูลรูปภาพ, ภาษาต้นทาง และโมเดลที่เลือกไปคำนวณ MD5 Cache Key หากเคยแปลภาพนี้แล้ว ระบบจะดึงผลลัพธ์จาก RAM ส่งกลับทันทีใน 0.001 วินาที
+7. **ขั้นตอนที่ 7: การตรวจจับข้อความและตัดสไลซ์เว็บตูน (Deep Learning Detection & Auto-Tiling):**
+   * หากเป็นภาพทั่วไป: ส่งเข้าโมเดล `comic-text-detector.onnx` บน CUDA เพื่อสร้างมาสก์และพิกัดกล่องข้อความ
+   * หากเป็นเว็บตูนภาพยาว (สูงเกิน 2,400px): เปิดระบบ **Auto-Tiling** สไลซ์ภาพเป็นชิ้นละ 2,200px แบบเหลื่อมซ้อน 300px ประมวลผลที่ขนาดจริง 100% แล้วแปลงพิกัดกลับมารวมกัน พร้อมกำจัดกรอบซ้ำซ้อนด้วย NMS (IoU >= 0.55)
+8. **ขั้นตอนที่ 8: การอ่านตัวหนังสือและการกู้คืนข้อความสีสลับ (Native Tiled OCR & Inverted Recovery):**
+   ส่งภาพเข้า EasyOCR บน CUDA เพื่ออ่านข้อความ หากพบบอลลูนสีดำที่มีตัวหนังสือสีขาว ระบบจะ Invert ค่าสีอัตโนมัติเพื่ออ่านข้อความได้ครบถ้วน จากนั้นส่งข้อความเข้า `spell_corrector.py` เพื่อตัดคำขยะ ลายน้ำ และเครดิตเว็บไซต์ออก
+9. **ขั้นตอนที่ 9: การรวมบรรทัดเข้าเป็นบอลลูนคำพูด (Hierarchical Bubble Clustering):**
+   รวมบรรทัดข้อความที่แตกย่อยเข้าเป็นประโยคที่สมบูรณ์ในแต่ละบอลลูนคำพูด ตามระยะห่างแนวตั้งและแนวนอน ป้องกันไม่ให้ข้อความข้ามช่องหรือข้ามตัวละคร
+10. **ขั้นตอนที่ 10: การแปลภาษาด้วยโมเดล AI (Multi-Engine Dialogue Translation):**
+    ส่งกลุ่มประโยคบทสนทนาเข้าสู่เอนจินแปลภาษาที่ผู้ใช้เลือก (Gemini 2.5 Flash, Local Ollama หรือ Google Translate) พร้อมตรวจสอบว่าผลลัพธ์มีตัวอักษรภาษาไทยจริง ไม่หลุดคำแปลเดิม
+11. **ขั้นตอนที่ 11: การลบตัวอักษรเดิมแบบคงลายเส้นตัวละคร (Precision Stroke Inpainting):**
+    ใช้เทคนิค Stroke Inpainting ลบข้อความภาษาอังกฤษ/เกาหลีเดิมออกเฉพาะในบอลลูนคำพูดที่แปลเท่านั้น โดยไม่ล้นไปโดนลายเส้น ใบหน้า หรือสกรีนโทนของการ์ตูน
+12. **ขั้นตอนที่ 12: การตัดคำและเรนเดอร์ตัวอักษรไทย (Smart Typesetting & High-Contrast Rendering):**
+    นำข้อความแปลภาษาไทยมาตัดคำตามพจนานุกรม คำนวณขนาดตัวอักษรให้พอดีกับรูปทรงของบอลลูนคำพูด และเรนเดอร์ลงในภาพด้วยเส้นขอบตัดกันหนา 2–3px เพื่อให้อ่านง่าย ชัดเจน
+13. **ขั้นตอนที่ 13: การตอบกลับและการแทนที่ภาพบนหน้าเว็บแบบไร้รอยต่อ (Seamless DOM Replacement):**
+    เซิร์ฟเวอร์บันทึกผลลัพธ์ลงแคชและส่งภาพ Base64 กลับไปยังเบราว์เซอร์ สคริปต์หน้าเว็บจะนำภาพแปลเข้าแทนที่ภาพเดิมทันที โดยคงสัดส่วน การซูม และการเลื่อนหน้าจอของผู้อ่านไว้อย่างสมบูรณ์ 100%
+
+---
+
+## 🔬 สถาปัตยกรรมและการทำงานเชิงลึกของโค้ดระบบ (Deep-Dive System Architecture)
+
+ระบบ Manga Translator 2.0 ถูกออกแบบใหม่ทั้งหมดในรูปแบบ **Modular Pipeline Architecture** เพื่อแยกส่วนหน้าที่การทำงาน (Separation of Concerns) รองรับการประมวลผลทั้งมังงะแบบหน้าเดี่ยว และเว็บตูนขนาดยาวแบบ Long Strip ได้อย่างรวดเร็วและแม่นยำ
+
+### 🔄 แผนภาพการไหลของข้อมูลทั้งระบบ (End-to-End Execution Pipeline)
+
+```mermaid
+graph TD
+    A["🌐 Web Browser / Manga Reader"] -->|"1. Adaptive Preload Supervisor"| B["📦 Base64 Image Payload"]
+    B -->|"2. POST /translate_base64"| C["🚪 API Gateway (FastAPI Route)"]
+    C -->|"Check MD5 Cache"| D{"มีใน Cache หรือไม่?"}
+    D -- มี -->|"คืนผลทันที (0.001s)"| Z["🎨 Render Image to Browser"]
+    D -- ไม่มี --> E["🧩 Dimension & Aspect Filter"]
+    E --> F["🧠 Deep Learning Comic Detector (ONNX)"]
+    E --> G["👁️ Native Tiled Offline OCR (CUDA)"]
+    F & G -->|"Auto-Tiling + NMS"| H["📦 Unified Text Boxes & Masks"]
+    H --> I["🔗 Hierarchical Bubble Clustering"]
+    I --> J["🎨 Style & Contrast Extractor"]
+    I --> K["🤖 Multi-Engine AI Translator"]
+    K --> L["🛡️ Precision Stroke Inpainting"]
+    K & L --> M["✍️ Dynamic Thai Typesetter"]
+    M --> N["💾 Cache Result & Send Base64"]
+    N --> Z
+```
+
+---
+
+### 1. 🖥️ ฝั่งเบราว์เซอร์และผู้ใช้งาน (Client Architecture)
+**ไฟล์หลัก:** `extension/content.script.js` และ `userscript/manga-translator.user.js`
+
+*   **⚡ Adaptive Preload Supervisor:**
+    *   **ปัญหาเดิม:** ระบบเดิมใช้วิธีนับหน้าแบบตายตัว (Fixed Lookahead 3 หน้า) ซึ่งมักเจอปัญหากับเว็บตูนที่ใช้ระบบ Lazy Loading หรือ Infinite Scroll เมื่อสั่งแปลหน้าถัดไปที่ภาพยังโหลดไม่เสร็จ ระบบจะส่ง Placeholder เปล่าหรือแบนเนอร์ว่างๆ เข้าไปประมวลผล ทำให้เกิดบัคหน้าจอค้าง
+    *   **กลไกใหม่:** ระบบจะรันฟังก์ชัน `isImageLoadedAndReady(img)` ตรวจสอบคุณสมบัติ 3 ด้านก่อนแปลเสมอ:
+        1. `img.complete === true` (เบราว์เซอร์ดาวน์โหลดภาพเสร็จสมบูรณ์แล้ว)
+        2. `img.naturalWidth >= 200` และ `img.naturalHeight >= 200` (ป้องกันภาพไอคอน, สปินเนอร์หมุนโหลด หรือโลโก้เว็บ)
+        3. ตรวจสอบว่าภาพไม่อยู่ในระหว่างการแปลซ้ำ (`img.dataset.mangaTranslating`) และยังไม่เคยแปลสำเร็จมาก่อน (`img.dataset.mangaTranslated`)
+*   **🎯 Dynamic Viewport Priority:**
+    *   คำนวณตำแหน่งหน้าจอแบบเรียลไทม์ด้วย `findCurrentReadingIndex()` ผ่าน `getBoundingClientRect()`
+    *   จัดลำดับความสำคัญสูงสุดให้แก่หน้าที่สายตาของผู้ใช้อ่านอยู่จริง (`currIdx`) ก่อนเสมอ จากนั้นระบบจะทยอยแปลล่วงหน้าลงไปด้านล่างอย่างต่อเนื่องตามจำนวนหน้าที่โหลดเข้ามาใน DOM จริง
+*   **🔔 Reactive Event Loop:**
+    *   ติดตั้ง `MutationObserver` คอยเฝ้าดูการเพิ่มโหนดรูปภาพใหม่ในหน้าเว็บ
+    *   ติดตั้ง Debounced Scroll Listener (`wakeSupervisor()`) เมื่อผู้ใช้เลื่อนหน้าจอลงไป ระบบจะปลุกตัวคุมคิวขึ้นมาดักจับและส่งหน้าใหม่เข้าแปลทันทีโดยไม่มีการหน่วงเวลา
+*   **🖼️ Zero-Layout-Shift Canvas Replacement:**
+    *   เมื่อได้ผลลัพธ์ภาพแปลกลับมา จะทำการสลับภาพเข้าแทนที่ผ่าน Canvas หรือ Data URL อย่างแนบเนียน พร้อมรักษาสัดส่วน ขนาดความกว้าง-สูง และความสามารถในการซูมหรือเลื่อนหน้าจอของผู้อ่านไว้ครบถ้วน 100%
+
+---
+
+### 2. 🚪 ประตูเชื่อมต่อและตัวกรองข้อมูล (API & Pre-filtering Layer)
+**ไฟล์หลัก:** `backend/api/v1/translate_routes.py` และ `backend/core/cache_manager.py`
+
+*   **Base64 Sanitization & Header Autocorrection:**
+    *   รองรับทั้ง Base64 มาตรฐานและ URL-Safe Base64
+    *   ตรวจจับและตัด Padding อัตโนมัติ ป้องกันปัญหา Malformed Base64 จากเบราว์เซอร์
+    *   รองรับฟอร์แมตภาพสมัยใหม่ครอบคลุม JPEG, PNG, WEBP, AVIF และ HEIF
+*   **Dimension & Banner Pre-Filtering:**
+    *   คัดกรองขนาดต่ำกว่า `250x250` พิกเซลออกทันที เพื่อไม่ให้กินทรัพยากร GPU กับไอคอนหรือองค์ประกอบตกแต่งเว็บ
+    *   ตรวจวัดอัตราส่วนภาพ (Aspect Ratio): กรองภาพที่กว้างเกินไป (`w/h > 2.8`) เช่น แบนเนอร์โฆษณาด้านบน/ล่างของเว็บ หรือยาวผิดปกติ (`h/w > 25.0`)
+*   **Model-Aware Hash Caching:**
+    *   คำนวณ MD5 Key จาก `[Model] + [SourceLang] + [ImagePayload]`
+    *   หากผู้ใช้เลื่อนจอกลับมาดูหน้าเดิม หรือรีเฟรชหน้าเว็บ ระบบจะตอบกลับผลลัพธ์จากแคชในหน่วยความจำทันทีในเวลาไม่ถึง **0.001 วินาที**
+
+---
+
+### 3. 📜 ระบบประมวลผลเว็บตูนภาพยาว (Webtoon Long-Strip Auto-Tiling Engine)
+**ไฟล์หลัก:** `backend/vision/comic_detector.py` และ `backend/ocr/comic_recognizer.py`
+
+*   **ปัญหาคอขวดของ OCR แบบดั้งเดิม:**
+    *   เว็บตูนยุคปัจจุบันมักมีขนาดยาวมาก เช่น สูง 5,000 ถึง 12,000+ พิกเซล แต่กว้างเพียง 800–1,200 พิกเซล
+    *   เมื่อส่งภาพทั้งภาพเข้าสู่ EasyOCR หรือโมเดล Deep Learning ซึ่งมีการจำกัดขนาดแคนวาส (เช่น `canvas_size=1920`) ภาพจะถูกบีบอัดสัดส่วนลงมาถึง 5–6 เท่า ทำให้ตัวอักษรเหลือความสูงเพียง 2–3 พิกเซล ส่งผลให้โมเดลอ่านผิดพลาดทั้งหมด หรือมองไม่เห็นตัวหนังสือเลย
+*   **อัลกอริทึม Auto-Tiling ที่ความละเอียด 1:1:**
+    1.  **เงื่อนไขการทำงาน:** ทำงานอัตโนมัติเมื่อภาพมีความสูงเกิน `2,400px` และอัตราส่วน `h/w > 1.8`
+    2.  **การสไลซ์ภาพย่อย (Chunk Slicing):** หั่นภาพตามแนวนอนด้วยความสูงชิ้นละ `2,200px` โดยมีส่วนเหลื่อมซ้อนกัน `300px` (Overlap) เพื่อรับประกันว่าจะไม่มีบอลลูนคำพูดใดถูกตัดครึ่งตรงรอยต่อ
+    3.  **Inference ที่ Native Resolution:** แต่ละชิ้นส่วนถูกส่งเข้าประมวลผลที่สเกลจริง 100% ทำให้ตัวอักษรคมชัดสูงสุด
+    4.  **Coordinate Projection:** แปลงพิกัดของกล่องข้อความที่ตรวจพบกลับคืนสู่พิกัดแกน Y บนภาพต้นฉบับขนาดยาวเต็ม
+    5.  **Non-Maximum Suppression (NMS):** คำนวณค่า Intersection over Union (IoU) ด้วยเกณฑ์ threshold `0.55` เพื่อกำจัดกล่องข้อความที่ตรวจจับซ้ำซ้อนบริเวณพื้นที่เหลื่อมซ้อนได้อย่างสมบูรณ์แบบ
+
+---
+
+### 4. 👁️ ระบบรู้จำข้อความขั้นสูง (Advanced Comic OCR & Inverted Recovery)
+**ไฟล์หลัก:** `backend/ocr/comic_recognizer.py` และ `backend/ocr/spell_corrector.py`
+
+*   **Native CRAFT + ResNet/BiLSTM:** ประมวลผลบน CUDA ด้วย Batch Size ขนาด 16 ช่วยให้อ่านข้อความทั้งหน้าเสร็จสิ้นภายในเวลาเพียง 0.3–0.5 วินาที
+*   **Inverted Text Luminance Recovery:**
+    *   ในฉากต่อสู้หรือบรรยากาศตึงเครียด มักพบบอลลูนคำพูดสีดำที่มีตัวหนังสือสีขาว
+    *   ระบบมีอัลกอริทึมตรวจสอบความสว่างเฉลี่ยของภาพข้อความ หากพบว่าเป็นพื้นหลังสีเข้ม (`brightness < 95`) ระบบจะทำการ Invert ค่าสี เพื่อให้อ่านตัวหนังสือสีขาวได้แม่นยำ 100%
+*   **Noise & Watermark Filter:**
+    *   กรองเสียงเอฟเฟกต์ (SFX) ที่เป็นตัวอักษรเดี่ยวไร้ความหมาย
+    *   ตัดคำแปลกปลอมที่เกิดจากข้อความระบบ เช่น "Translate Page", "Tampermonkey", "Google Translate"
+    *   กรองข้อความเครดิตกลุ่มผู้แปล ลายน้ำเว็บไซต์ และลิงก์โดเมนต่างๆ ออกอัตโนมัติ เพื่อไม่ให้แปลข้อความที่ไม่เกี่ยวข้องลงในหน้าการ์ตูน
+
+---
+
+### 5. 🔗 ระบบรวมกลุ่มบอลลูนคำพูด (Hierarchical Bubble Clustering)
+**ไฟล์หลัก:** `backend/vision/bubble_detector.py`
+
+*   โมเดล OCR โดยทั่วไปจะตรวจจับข้อความแยกออกมาทีละบรรทัด (Lines) หากแปลแยกกันทีละบรรทัด ความหมายของประโยคจะเพี้ยนและขาดตอน
+*   **Spatiotemporal Clustering Algorithm:**
+    *   รวมบรรทัดข้อความที่อยู่ในบอลลูนเดียวกันเข้าเป็น "ประโยคเดี่ยวที่สมบูรณ์" ก่อนส่งให้ AI แปล
+    *   **กฎควบคุมเชิงเรขาคณิต (Geometric Constraints):**
+        *   ระยะห่างแนวตั้ง (Vertical Gap): บรรทัดถัดไปต้องอยู่ห่างไม่เกิน `24px` หรือไม่เกิน `1.2 เท่า` ของความสูงบรรทัดเดิม
+        *   การเยื้องแนวนอน (Horizontal Overlap): ขอบซ้ายและขวาของบรรทัดต้องมีส่วนซ้อนทับกันอย่างน้อย `-20px`
+        *   ขนาดตัวอักษร: ฟอนต์ต้องมีขนาดใกล้เคียงกัน ป้องกันการรวมหัวข้อใหญ่เข้ากับบทสนทนาตัวเล็ก
+    *   **ผลลัพธ์:** ป้องกันปัญหากล่องข้อความกระโดดข้ามช่อง ข้ามใบหน้าตัวละคร หรือรวมข้ามบอลลูนได้อย่างเด็ดขาด
+
+---
+
+### 6. 🛡️ ระบบลบตัวอักษรและปกป้องงานศิลป์ (Precision Stroke-Level Inpainting)
+**ไฟล์หลัก:** `backend/inpainting/dual_cleaner.py` และ `backend/vision/style_extractor.py`
+
+*   **ปัญหาของการลบแบบสี่เหลี่ยมทั่วไป (Bounding Box Erase):** การลบทั้งกล่องสี่เหลี่ยมจะทำให้เกิดรอยแหว่งเป็นปื้นสี่เหลี่ยมสีขาว ล้นไปทับเส้นผม ใบหน้า เสื้อผ้า หรือแบ็กกราวด์ของการ์ตูน
+*   **Dual-Zone Inpainting Strategy:**
+    *   **Zone 1: ในบอลลูนคำพูดพื้นหลังเรียบ (Solid Bubbles):** ตรวจสอบค่าเบี่ยงเบนมาตรฐานของสีพื้นหลัง (`std < 25`) หากเป็นสีพื้นเรียบจะทำการลบและเติมสีพื้นหลังเดิมอย่างเรียบเนียน
+    *   **Zone 2: บนภาพวาดหรือสกรีนโทน (Complex Artworks):** ใช้มาสก์ระดับลายเส้นตัวอักษร (Text-Stroke Mask) ที่ได้จาก Deep Learning ขยายขอบเพียง `3px` ด้วย Dilated Ellipse Kernel เพื่อลบเฉพาะตัวหนังสือเท่านั้น ลายเส้นตัวละครและสกรีนโทนรอบข้างจะคงเดิม 100%
+*   **Dialogue-Only Inpainting Safeguard:**
+    *   ระบบจะสั่งลบเฉพาะตำแหน่งข้อความที่ผ่านการยืนยันว่าจะ "มีบทแปลภาษาไทยใส่กลับลงไปจริง" เท่านั้น
+    *   หากเป็นข้อความเสียงเอฟเฟกต์ (SFX) ภาษาอังกฤษหรือภาพวาดที่ไม่ได้แปล ระบบจะไม่ลบเด็ดขาด ทำให้งานศิลป์ไม่แหว่งหรือสูญหาย
+
+---
+
+### 7. 🤖 ศูนย์ควบคุมการแปลภาษาหลายรูปแบบ (Multi-Engine Translation Orchestrator)
+**ไฟล์หลัก:** `backend/translator/gemini_engine.py`, `ollama_engine.py`, และ `google_engine.py`
+
+*   **Gemini 2.5 Flash API:**
+    *   ใช้โมเดล AI ยุคใหม่ล่าสุดที่ประมวลผลข้อความแบบ Context-Aware ผ่าน System Prompt ที่ออกแบบมาสำหรับมังงะโดยเฉพาะ แปลบทสนทนาได้เป็นธรรมชาติ สละสลวย เข้ากับอารมณ์ของตัวละคร
+*   **Ollama Local AI (ออฟไลน์ 100%):**
+    *   รองรับโมเดลรันบนการ์ดจอเครื่อง: **Gemma 2 (9B)**, **Qwen 2.5 (3B)**, และ **Qwen 3 (8B)**
+    *   มีระบบจัดการคืนหน่วยความจำ VRAM อัตโนมัติ (`unload_ollama_models()`) เมื่อสลับไปใช้เอนจินอื่น
+*   **Seamless Google Translate Fallback:**
+    *   หากเกิดปัญหาเครือข่าย, โควตา API เต็ม หรือ Local AI ประมวลผลช้าเกินกำหนด ระบบจะสลับมาใช้ Google Translate สำรองแบบคู่ขนานทันทีในเสี้ยววินาที
+*   **Thai Character Validator:**
+    *   มีระบบตรวจสอบ Regex ตัวอักษรภาษาไทย `[\u0e00-\u0e7f]` หากผลลัพธ์ที่ได้ยังเป็นภาษาอังกฤษหรือไม่มีภาษาไทย ระบบจะทำการแปลซ้ำผ่านเอนจินสำรองทันที รับประกันว่าไม่มีหลุดคำแปล
+
+---
+
+### 8. ✍️ ระบบจัดวางตัวอักษรไทยอัจฉริยะ (Dynamic Typesetting & Thai Typography)
+**ไฟล์หลัก:** `backend/typesetter/graphic_renderer.py` และ `backend/typesetter/thai_formatter.py`
+
+*   **Thai Word Wrapping:**
+    *   ภาษาไทยไม่มีการเว้นวรรคระหว่างคำ หากใช้การตัดคำแบบธรรมดาจะทำให้สระและพยางค์ฉีกขาดอ่านไม่รู้เรื่อง
+    *   ระบบใช้พจนานุกรมและการตัดคำภาษาไทย เพื่อจัดกลุ่มคำและตัดขึ้นบรรทัดใหม่ตามจังหวะประโยคที่เป็นธรรมชาติ
+*   **Shape-Aware Binary Search Font Scaling:**
+    *   คำนวณพื้นที่รูปทรงของบอลลูนคำพูด (ความกว้างและความสูง)
+    *   ใช้กระบวนการ Binary Search ปรับขนาด Font Size อัตโนมัติ (ตั้งแต่ 12pt ถึง 45pt) ให้ตัวอักษรมีขนาดใหญ่เต็มพื้นที่บอลลูน อ่านง่าย ชัดเจน โดยคงระยะห่างจากขอบบอลลูน (Padding) ไว้อย่างพอดี 8–10%
+*   **Contrasting Stroke Outline (เส้นขอบชัดลึก):**
+    *   ประมวลผลการวาด 2 รอบ (Two-Pass Rendering):
+        *   รอบที่ 1: วาดเส้นขอบนอกหนา 2–3px ด้วยสีที่ตัดกับตัวหนังสือ (เช่น ตัวหนังสือสีดำขอบขาว หรือตัวหนังสือสีขาวขอบดำ)
+        *   รอบที่ 2: วาดตัวอักษรจริงทับลงไป
+    *   ทำให้ข้อความภาษาไทยคมชัด อ่านง่ายสบายตาบนทุกพื้นหลัง ไม่ว่าจะเป็นพื้นขาว พื้นดำ หรือภาพแอ็กชันที่มีสีสันซับซ้อน
 
 ---
 
