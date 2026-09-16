@@ -80,4 +80,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         return true; // Keep message channel open for asynchronous sendResponse
     }
+
+    // 3. Proxy JSON GET requests (for /gemini_quota, healthcheck, etc.)
+    if (request.action === 'fetch_json') {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        fetch(request.url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal
+        })
+        .then(async (response) => {
+            clearTimeout(timeoutId);
+            if (!response.ok) {
+                sendResponse({ 
+                    success: false, 
+                    status: response.status, 
+                    error: `HTTP ${response.status}` 
+                });
+                return;
+            }
+            const data = await response.json();
+            sendResponse({ success: true, data: data });
+        })
+        .catch((err) => {
+            clearTimeout(timeoutId);
+            sendResponse({ 
+                success: false, 
+                error: err.message || 'Background JSON fetch failed' 
+            });
+        });
+
+        return true;
+    }
 });

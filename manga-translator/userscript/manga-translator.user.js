@@ -562,7 +562,7 @@ function createToggleUI() {
     const models = [
         { value: 'google_translate', label: '🌐 Google Translate (ความเร็วแสง 0.2 วิ - แนะนำ เสถียรสุด)' },
         { value: 'local_qwen25', label: '⚡ Local AI: Qwen 2.5 3B (เร็วเบา 1-2 วิ - ออฟไลน์)' },
-        { value: 'gemini', label: '✨ Gemini 2.5 Flash (AI ภาษาการ์ตูน - ออนไลน์)' },
+        { value: 'gemini', label: '✨ Gemini AI (Auto Cascade 5 รุ่น - ออนไลน์)' },
         { value: 'local_gemma2', label: '💻 Local AI: Gemma 2 9B (ฉลาดสูง - ออฟไลน์)' },
         { value: 'local_qwen3', label: '💻 Local AI: Qwen 3 8B (โมเดล Qwen - ออฟไลน์)' }
     ];
@@ -620,7 +620,7 @@ function createToggleUI() {
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.1);
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-        width: 240px;
+        width: 310px;
         font-family: inherit;
         color: #f8fafc;
     `;
@@ -690,6 +690,197 @@ function createToggleUI() {
     });
     settingsPanel.appendChild(saveBtn);
 
+    // เส้นคั่น
+    const quotaDivider = document.createElement('div');
+    quotaDivider.style.cssText = `
+        width: 100%;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.12);
+        margin: 4px 0;
+    `;
+    settingsPanel.appendChild(quotaDivider);
+
+    // ส่วนหัวของแดชบอร์ดโควต้า Gemini
+    const quotaHeader = document.createElement('div');
+    quotaHeader.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    `;
+    
+    const quotaTitle = document.createElement('div');
+    quotaTitle.style.cssText = `
+        font-size: 11px;
+        font-weight: 700;
+        color: #38bdf8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    `;
+    quotaTitle.innerHTML = `<span>✨</span> โควต้า Gemini API วันนี้`;
+    quotaHeader.appendChild(quotaTitle);
+
+    const refreshQuotaBtn = document.createElement('div');
+    refreshQuotaBtn.title = 'รีเฟรชสถานะโควต้า';
+    refreshQuotaBtn.style.cssText = `
+        cursor: pointer;
+        color: #94a3b8;
+        display: flex;
+        align-items: center;
+        padding: 2px 4px;
+        border-radius: 4px;
+        transition: all 0.2s;
+        font-size: 11px;
+    `;
+    refreshQuotaBtn.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.4s;">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+    `;
+    refreshQuotaBtn.addEventListener('mouseenter', () => { refreshQuotaBtn.style.color = '#38bdf8'; });
+    refreshQuotaBtn.addEventListener('mouseleave', () => { refreshQuotaBtn.style.color = '#94a3b8'; });
+    quotaHeader.appendChild(refreshQuotaBtn);
+    settingsPanel.appendChild(quotaHeader);
+
+    // ป้ายสรุปโควต้ารวม
+    const totalSummaryBadge = document.createElement('div');
+    totalSummaryBadge.style.cssText = `
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.2);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 10px;
+        color: #bae6fd;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    `;
+    totalSummaryBadge.innerHTML = `<span>โควต้ารวม 5 รุ่น:</span><strong id="manga-gemini-total-rem">กำลังโหลด...</strong>`;
+    settingsPanel.appendChild(totalSummaryBadge);
+
+    // รายการแสดงทั้ง 5 โมเดล
+    const quotaListContainer = document.createElement('div');
+    quotaListContainer.id = 'manga-gemini-quota-list';
+    quotaListContainer.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 240px;
+        overflow-y: auto;
+    `;
+    settingsPanel.appendChild(quotaListContainer);
+
+    // ฟังก์ชันดึงและเรนเดอร์ข้อมูลโควต้าสด
+    async function fetchAndRenderGeminiQuota() {
+        let serverUrl = (localStorage.getItem('manga_api_url') || 'http://127.0.0.1:8000').trim();
+        if (!/^https?:\/\//i.test(serverUrl)) serverUrl = 'http://' + serverUrl;
+        const targetUrl = serverUrl.replace(/\/$/, '') + '/gemini_quota';
+
+        const refreshSvg = refreshQuotaBtn.querySelector('svg');
+        if (refreshSvg) refreshSvg.style.transform = 'rotate(360deg)';
+        setTimeout(() => { if (refreshSvg) refreshSvg.style.transform = 'rotate(0deg)'; }, 400);
+
+        let data = null;
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            try {
+                const res = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ action: 'fetch_json', url: targetUrl }, (response) => {
+                        if (chrome.runtime.lastError || !response || !response.success) resolve(null);
+                        else resolve(response.data);
+                    });
+                });
+                if (res) data = res;
+            } catch (e) {}
+        }
+        if (!data && typeof GM_xmlhttpRequest !== 'undefined') {
+            try {
+                data = await new Promise((resolve) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: targetUrl,
+                        headers: { 'Accept': 'application/json' },
+                        timeout: 5000,
+                        onload: (r) => {
+                            if (r.status >= 200 && r.status < 300) {
+                                try { resolve(JSON.parse(r.responseText)); } catch(err) { resolve(null); }
+                            } else resolve(null);
+                        },
+                        ontimeout: () => resolve(null),
+                        onerror: () => resolve(null)
+                    });
+                });
+            } catch (e) {}
+        }
+        if (!data) {
+            try {
+                const controller = new AbortController();
+                const tid = setTimeout(() => controller.abort(), 4000);
+                const r = await fetch(targetUrl, { signal: controller.signal });
+                clearTimeout(tid);
+                if (r.ok) data = await r.json();
+            } catch (e) {}
+        }
+
+        if (!data || !data.models) {
+            totalSummaryBadge.innerHTML = `<span style="color:#f87171;">ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์หลังบ้านได้</span>`;
+            quotaListContainer.innerHTML = `<div style="font-size:10px; color:#94a3b8; text-align:center; padding:4px;">โปรดตรวจสอบว่ารัน run_backend.bat แล้ว</div>`;
+            return;
+        }
+
+        const totalRem = data.total_remaining.toLocaleString();
+        const totalLim = data.total_limit.toLocaleString();
+        totalSummaryBadge.innerHTML = `<span>โควต้ารวมคงเหลือ:</span><strong style="color:#38bdf8;">${totalRem} / ${totalLim} หน้า</strong>`;
+
+        quotaListContainer.innerHTML = '';
+        data.models.forEach(m => {
+            const item = document.createElement('div');
+            item.style.cssText = `
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                padding: 6px 8px;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            `;
+
+            let badgeHtml = '';
+            if (m.status === 'ready') {
+                const isCurrentActive = (data.active_model === m.id);
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-weight:600;">${isCurrentActive ? '★ ใช้งานอยู่' : 'พร้อมใช้'}</span>`;
+            } else if (m.status === 'exhausted') {
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:600;">โควต้าหมดแล้ว</span>`;
+            } else {
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); font-weight:600;">ติด Rate Limit</span>`;
+            }
+
+            const pct = Math.min(100, Math.round((m.used / m.limit) * 100));
+            const barColor = (m.status === 'exhausted') ? '#ef4444' : (pct > 80 ? '#f59e0b' : '#38bdf8');
+
+            item.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; font-weight:600; color:#f1f5f9;">${m.name}</span>
+                    ${badgeHtml}
+                </div>
+                <div style="width:100%; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden;">
+                    <div style="width:${pct}%; height:100%; background:${barColor}; transition:width 0.4s;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:10px; color:#94a3b8;">
+                    <span>ใช้แล้ว ${m.used.toLocaleString()} / ${m.limit.toLocaleString()}</span>
+                    <span>เหลือ ${m.remaining.toLocaleString()}</span>
+                </div>
+            `;
+            quotaListContainer.appendChild(item);
+        });
+    }
+
+    refreshQuotaBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fetchAndRenderGeminiQuota();
+    });
+
     // ปุ่มรูปเฟืองสำหรับเปิด/ปิดตั้งค่า
     const settingsBtn = document.createElement('div');
     settingsBtn.id = 'manga-settings-btn';
@@ -723,6 +914,7 @@ function createToggleUI() {
         if (settingsPanel.style.display === 'none' || settingsPanel.style.display === '') {
             settingsPanel.style.display = 'flex';
             ipInput.focus();
+            fetchAndRenderGeminiQuota();
         } else {
             settingsPanel.style.display = 'none';
         }

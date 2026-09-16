@@ -19,3 +19,6 @@ manga-translator/backend/models/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Runtime data
+manga-translator/backend/data/

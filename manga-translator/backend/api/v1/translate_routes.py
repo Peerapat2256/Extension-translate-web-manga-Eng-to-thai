@@ -121,3 +121,8 @@ def health():
         "cuda": torch.cuda.is_available(),
         "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
     }
+
+@router.get("/gemini_quota")
+def get_gemini_quota_endpoint():
+    from core.quota_tracker import quota_tracker
+    return quota_tracker.get_status()

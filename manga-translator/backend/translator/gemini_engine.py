@@ -75,7 +75,9 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th"):
     )
     
     gemini_succeeded = False
-    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    from core.quota_tracker import quota_tracker
+    candidate_models = quota_tracker.get_candidate_models()
+    print(f"[*] Gemini Auto-Cascade order: {candidate_models}")
     
     def _call_gemini(model_name):
         return client.models.generate_content(
@@ -102,13 +104,22 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th"):
                     if orig_idx < len(results):
                         results[orig_idx] = trans_text
                         text_cache[f"gemini_{source_lang}_{target_lang}_{texts_list[orig_idx].strip()}"] = trans_text
+            
+            # Record successful call in quota tracker
+            quota_tracker.record_usage(model_name)
+            print(f"[Translator] Gemini model [{model_name}] translated successfully.")
             gemini_succeeded = True
             break
         except FutureTimeoutError:
-            print(f"[Translator] Gemini model {model_name} timed out (>5.5s). Trying next candidate / fallback...")
+            print(f"[Translator] Gemini model [{model_name}] timed out (>5.5s). Cascading to next model...")
             continue
         except Exception as e:
-            print(f"[Translator] Gemini model {model_name} unavailable ({e}). Checking fallback...")
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "Quota" in err_str or "quota" in err_str:
+                quota_tracker.record_exhausted(model_name, err_str)
+                print(f"[Translator] Gemini model [{model_name}] QUOTA EXHAUSTED (429). Auto-cascading to next model...")
+            else:
+                print(f"[Translator] Gemini model [{model_name}] unavailable ({e}). Cascading to next model...")
             continue
                 
     # Auto-fallback to Google Translate for any missing/untranslated items
