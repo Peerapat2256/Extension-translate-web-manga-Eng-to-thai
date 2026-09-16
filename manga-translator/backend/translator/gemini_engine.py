@@ -33,10 +33,12 @@ def get_gemini_client():
 
 _gemini_executor = ThreadPoolExecutor(max_workers=4)
 
-def translate_batch_gemini(texts_list, source_lang="en", target_lang="th"):
+def translate_batch_gemini(texts_list, source_lang="en", target_lang="th", preferred_model=None):
     """
     Sends all texts on the manga page in a single batch call to Gemini.
-    Protected with a strict 3.5s hard deadline and zero SDK retry hangs.
+    Protected with a strict deadline and zero SDK retry hangs.
+    If preferred_model is specified, prioritizes that model first;
+    otherwise auto-cascades through all ready models.
     Instantly falls back to Google Translate on timeout or high load.
     """
     if not texts_list:
@@ -76,8 +78,11 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th"):
     
     gemini_succeeded = False
     from core.quota_tracker import quota_tracker
-    candidate_models = quota_tracker.get_candidate_models()
-    print(f"[*] Gemini Auto-Cascade order: {candidate_models}")
+    candidate_models = quota_tracker.get_candidate_models(preferred_model=preferred_model)
+    if preferred_model and preferred_model != "auto":
+        print(f"[*] Translating with preferred model: [{preferred_model}] (Cascade candidates: {candidate_models[:3]}...)")
+    else:
+        print(f"[*] Gemini Auto-Cascade order: {candidate_models}")
     
     def _call_gemini(model_name):
         return client.models.generate_content(

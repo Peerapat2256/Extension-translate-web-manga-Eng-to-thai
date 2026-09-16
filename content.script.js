@@ -544,9 +544,18 @@ function createToggleUI() {
     `;
     
     const models = [
-        { value: 'google_translate', label: '🌐 Google Translate (ความเร็วแสง 0.2 วิ - แนะนำ เสถียรสุด)' },
-        { value: 'local_qwen25', label: '⚡ Local AI: Qwen 2.5 3B (เร็วเบา 1-2 วิ - ออฟไลน์)' },
-        { value: 'gemini', label: '✨ Gemini AI (Auto Cascade 5 รุ่น - ออนไลน์)' },
+        { value: 'google_translate', label: '🌐 Google Translate (ความเร็วแสง 0.2 วิ - เสถียรสุด)' },
+        { value: 'gemini', label: '✨ Gemini: 🔄 Auto Cascade (9 รุ่น สลับอัตโนมัติ - 13,500 หน้า/วัน)' },
+        { value: 'gemini:gemini-3.5-flash-lite', label: '⚡ Gemini 3.5 Flash-Lite (เร็วจัด ~0.8s - เบา ประหยัดโควต้า)' },
+        { value: 'gemini:gemini-flash-lite-latest', label: '⚡ Gemini Flash-Lite Latest (เร็วมาก ~0.9s - สำนวนการ์ตูนมันส์)' },
+        { value: 'gemini:gemini-3.1-flash-lite', label: '⚡ Gemini 3.1 Flash-Lite (เสถียร ~1.2s - น้ำหนักเบา)' },
+        { value: 'gemini:gemini-3-flash-preview', label: '✨ Gemini 3 Flash Preview (สปีดแฟลช ~3.2s - แม่นยำ)' },
+        { value: 'gemini:gemini-3.8-flash', label: '✨ Gemini 3.8 Flash (สเปกสูง ~4.1s - รูปประโยคยาก)' },
+        { value: 'gemini:gemini-flash-latest', label: '✨ Gemini Flash Latest (ฉลาดสมดุล ~4.3s - แนะนำ)' },
+        { value: 'gemini:gemini-3.6-flash', label: '✨ Gemini 3.6 Flash (คมชัดละเอียด ~5.9s - เจเนอเรชันใหม่)' },
+        { value: 'gemini:gemini-2.5-flash', label: '✨ Gemini 2.5 Flash (คลาสสิก ~8.4s - ละเอียดลึกซึ้ง)' },
+        { value: 'gemini:gemini-3.5-flash', label: '✨ Gemini 3.5 Flash (บริบทสูงสุด ~12.9s - เนื้อเรื่องเข้มข้น)' },
+        { value: 'local_qwen25', label: '💻 Local AI: Qwen 2.5 3B (เร็วเบา 1-2 วิ - ออฟไลน์)' },
         { value: 'local_gemma2', label: '💻 Local AI: Gemma 2 9B (ฉลาดสูง - ออฟไลน์)' },
         { value: 'local_qwen3', label: '💻 Local AI: Qwen 3 8B (โมเดล Qwen - ออฟไลน์)' }
     ];
@@ -734,25 +743,57 @@ function createToggleUI() {
         background: rgba(56, 189, 248, 0.08);
         border: 1px solid rgba(56, 189, 248, 0.2);
         border-radius: 6px;
-        padding: 4px 8px;
+        padding: 6px 8px;
         font-size: 10px;
         color: #bae6fd;
         display: flex;
         justify-content: space-between;
         align-items: center;
     `;
-    totalSummaryBadge.innerHTML = `<span>โควต้ารวม 5 รุ่น:</span><strong id="manga-gemini-total-rem">กำลังโหลด...</strong>`;
+    totalSummaryBadge.innerHTML = `<span>โควต้ารวม 9 รุ่น:</span><strong id="manga-gemini-total-rem">กำลังโหลด...</strong>`;
     settingsPanel.appendChild(totalSummaryBadge);
 
-    // รายการแสดงทั้ง 5 โมเดล
+    // ปุ่มสลับโหมด Auto Cascade
+    const autoCascadeBtn = document.createElement('div');
+    autoCascadeBtn.id = 'manga-auto-cascade-btn';
+    autoCascadeBtn.style.cssText = `
+        background: rgba(99, 102, 241, 0.15);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        color: #a5b4fc;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.2s;
+    `;
+    autoCascadeBtn.innerHTML = `<span>🔄</span> โหมด Auto Cascade (สลับโมเดลอัตโนมัติเมื่อโควต้าหมด)`;
+    autoCascadeBtn.addEventListener('mouseenter', () => { autoCascadeBtn.style.background = 'rgba(99, 102, 241, 0.25)'; });
+    autoCascadeBtn.addEventListener('mouseleave', () => { autoCascadeBtn.style.background = 'rgba(99, 102, 241, 0.15)'; });
+    autoCascadeBtn.addEventListener('click', () => {
+        localStorage.setItem('manga_translation_model', 'gemini');
+        if (modelSelect) modelSelect.value = 'gemini';
+        console.log('[Manga Translator] Switched to Gemini Auto Cascade');
+        fetchAndRenderGeminiQuota();
+        resetTranslations();
+        if (isTranslationEnabled) startSequentialChapterTranslation();
+    });
+    settingsPanel.appendChild(autoCascadeBtn);
+
+    // รายการแสดงทั้ง 9 โมเดล
     const quotaListContainer = document.createElement('div');
     quotaListContainer.id = 'manga-gemini-quota-list';
     quotaListContainer.style.cssText = `
         display: flex;
         flex-direction: column;
         gap: 6px;
-        max-height: 240px;
+        max-height: 250px;
         overflow-y: auto;
+        padding-right: 2px;
     `;
     settingsPanel.appendChild(quotaListContainer);
 
@@ -815,25 +856,42 @@ function createToggleUI() {
 
         const totalRem = data.total_remaining.toLocaleString();
         const totalLim = data.total_limit.toLocaleString();
-        totalSummaryBadge.innerHTML = `<span>โควต้ารวมคงเหลือ:</span><strong style="color:#38bdf8;">${totalRem} / ${totalLim} หน้า</strong>`;
+        totalSummaryBadge.innerHTML = `<span>โควต้ารวม 9 รุ่นคงเหลือ:</span><strong style="color:#38bdf8;">${totalRem} / ${totalLim} หน้า</strong>`;
+
+        const currentActiveSaved = localStorage.getItem('manga_translation_model') || 'google_translate';
+        const isAutoActive = (currentActiveSaved === 'gemini');
+
+        if (isAutoActive) {
+            autoCascadeBtn.style.background = 'rgba(16, 185, 129, 0.2)';
+            autoCascadeBtn.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+            autoCascadeBtn.style.color = '#34d399';
+            autoCascadeBtn.innerHTML = `<span>✓</span> กำลังใช้งาน: โหมด Auto Cascade (สลับอัตโนมัติ)`;
+        } else {
+            autoCascadeBtn.style.background = 'rgba(99, 102, 241, 0.15)';
+            autoCascadeBtn.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+            autoCascadeBtn.style.color = '#a5b4fc';
+            autoCascadeBtn.innerHTML = `<span>🔄</span> เปลี่ยนเป็นโหมด Auto Cascade (สลับอัตโนมัติ)`;
+        }
 
         quotaListContainer.innerHTML = '';
         data.models.forEach(m => {
             const item = document.createElement('div');
+            const isSpecificSelected = (currentActiveSaved === ('gemini:' + m.id) || currentActiveSaved === m.id);
+
             item.style.cssText = `
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: ${isSpecificSelected ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255, 255, 255, 0.04)'};
+                border: 1px solid ${isSpecificSelected ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.08)'};
                 border-radius: 6px;
                 padding: 6px 8px;
                 display: flex;
                 flex-direction: column;
-                gap: 4px;
+                gap: 3px;
+                transition: all 0.2s;
             `;
 
             let badgeHtml = '';
             if (m.status === 'ready') {
-                const isCurrentActive = (data.active_model === m.id);
-                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-weight:600;">${isCurrentActive ? '★ ใช้งานอยู่' : 'พร้อมใช้'}</span>`;
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-weight:600;">พร้อมใช้</span>`;
             } else if (m.status === 'exhausted') {
                 badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:600;">โควต้าหมดแล้ว</span>`;
             } else {
@@ -842,20 +900,48 @@ function createToggleUI() {
 
             const pct = Math.min(100, Math.round((m.used / m.limit) * 100));
             const barColor = (m.status === 'exhausted') ? '#ef4444' : (pct > 80 ? '#f59e0b' : '#38bdf8');
+            const speedText = m.avg_speed || '~1s';
+            const descText = m.desc || '';
+
+            const selectBtnText = isSpecificSelected 
+                ? `<span style="color:#38bdf8; font-weight:700;">✓ กำลังใช้งานรุ่นนี้</span>` 
+                : `<span style="color:#94a3b8; cursor:pointer;" title="คลิกเพื่อเลือกเจาะจงใช้รุ่นนี้">👉 เลือกใช้รุ่นนี้</span>`;
 
             item.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:11px; font-weight:600; color:#f1f5f9;">${m.name}</span>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-size:11px; font-weight:600; color:#f1f5f9;">${m.name}</span>
+                        <span style="font-size:9px; padding:0 4px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; font-family:monospace;">${speedText}</span>
+                    </div>
                     ${badgeHtml}
                 </div>
-                <div style="width:100%; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden;">
+                ${descText ? `<div style="font-size:9.5px; color:#94a3b8; line-height:1.2;">${descText}</div>` : ''}
+                <div style="width:100%; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; margin:2px 0;">
                     <div style="width:${pct}%; height:100%; background:${barColor}; transition:width 0.4s;"></div>
                 </div>
-                <div style="display:flex; justify-content:space-between; font-size:10px; color:#94a3b8;">
-                    <span>ใช้แล้ว ${m.used.toLocaleString()} / ${m.limit.toLocaleString()}</span>
-                    <span>เหลือ ${m.remaining.toLocaleString()}</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:9.5px;">
+                    <span style="color:#64748b;">ใช้ ${m.used.toLocaleString()} / ${m.limit.toLocaleString()} (เหลือ ${m.remaining.toLocaleString()})</span>
+                    <div class="manga-select-specific-btn" data-model="gemini:${m.id}" style="font-size:9.5px;">
+                        ${selectBtnText}
+                    </div>
                 </div>
             `;
+
+            // เพิ่ม event คลิกเพื่อเลือกเจาะจงโมเดลนี้
+            const pickBtn = item.querySelector('.manga-select-specific-btn');
+            if (pickBtn && !isSpecificSelected) {
+                item.style.cursor = 'pointer';
+                item.addEventListener('click', () => {
+                    const targetVal = 'gemini:' + m.id;
+                    localStorage.setItem('manga_translation_model', targetVal);
+                    if (modelSelect) modelSelect.value = targetVal;
+                    console.log('[Manga Translator] Switched specific model to:', targetVal);
+                    fetchAndRenderGeminiQuota();
+                    resetTranslations();
+                    if (isTranslationEnabled) startSequentialChapterTranslation();
+                });
+            }
+
             quotaListContainer.appendChild(item);
         });
     }

@@ -5,11 +5,78 @@ import threading
 from datetime import datetime
 
 CASCADE_MODELS_DEF = [
-    {"id": "gemini-flash-latest", "name": "Gemini Flash (Latest)", "daily_limit": 1500, "tier": "Smartest & Fast"},
-    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash", "daily_limit": 1500, "tier": "Next-Gen Flash"},
-    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash", "daily_limit": 1500, "tier": "High Intelligence"},
-    {"id": "gemini-flash-lite-latest", "name": "Gemini Flash-Lite (Latest)", "daily_limit": 1500, "tier": "Ultra Fast (0.7s)"},
-    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash-Lite", "daily_limit": 1500, "tier": "Fast Backup"}
+    {
+        "id": "gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash-Lite",
+        "avg_speed": "~0.8s",
+        "daily_limit": 1500,
+        "tier": "เร็วจัด (Ultra Fast)",
+        "desc": "เบาและเร็วที่สุด ประหยัดโควต้า เหมาะกับการอ่านต่อเนื่อง"
+    },
+    {
+        "id": "gemini-flash-lite-latest",
+        "name": "Gemini Flash-Lite Latest",
+        "avg_speed": "~0.9s",
+        "daily_limit": 1500,
+        "tier": "สแลงการ์ตูนมันส์",
+        "desc": "เร็วมาก ภาษาการ์ตูนสละสลวย เข้าใจสแลงวัยรุ่น"
+    },
+    {
+        "id": "gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash-Lite",
+        "avg_speed": "~1.2s",
+        "daily_limit": 1500,
+        "tier": "เสถียรน้ำหนักเบา",
+        "desc": "โมเดลเสถียร น้ำหนักเบา ตอบสนองฉับไว"
+    },
+    {
+        "id": "gemini-3-flash-preview",
+        "name": "Gemini 3 Flash Preview",
+        "avg_speed": "~3.2s",
+        "daily_limit": 1500,
+        "tier": "สปีดแฟลชยุคใหม่",
+        "desc": "เทคโนโลยี Flash ยุคใหม่ แปลแม่นยำสูง"
+    },
+    {
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "avg_speed": "~4.1s",
+        "daily_limit": 1500,
+        "tier": "สเปกสูง",
+        "desc": "รุ่นความสามารถสูง เข้าใจรูปประโยคมังงะซับซ้อน"
+    },
+    {
+        "id": "gemini-flash-latest",
+        "name": "Gemini Flash Latest",
+        "avg_speed": "~4.3s",
+        "daily_limit": 1500,
+        "tier": "ฉลาดสมดุล (แนะนำ)",
+        "desc": "โมเดลหลักมาตรฐาน ฉลาด สมดุล คุณภาพสูง"
+    },
+    {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "avg_speed": "~5.9s",
+        "daily_limit": 1500,
+        "tier": "คมชัดละเอียด",
+        "desc": "เจเนอเรชันใหม่ แปลเก็บรายละเอียดคำพูดครบถ้วน"
+    },
+    {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "avg_speed": "~8.4s",
+        "daily_limit": 1500,
+        "tier": "คลาสสิกลึกซึ้ง",
+        "desc": "รุ่นคลาสสิก ฉลาดลึกซึ้ง (อาจมีคิวรอช่วงผู้ใช้หนาแน่น)"
+    },
+    {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "avg_speed": "~12.9s",
+        "daily_limit": 1500,
+        "tier": "บริบทสูงสุด",
+        "desc": "วิเคราะห์บริบทระดับสูงสุด แปลเนื้อเรื่องเข้มข้น"
+    }
 ]
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -136,14 +203,29 @@ class GeminiQuotaTracker:
                 print(f"[QuotaTracker] Model [{model_id}] marked RATE_LIMITED: {error_msg}")
                 self._save()
 
-    def get_candidate_models(self):
-        """Returns ordered list of models that are ready, followed by rate_limited, then exhausted."""
+    def get_candidate_models(self, preferred_model=None):
+        """
+        Returns ordered list of models that are ready, followed by rate_limited, then exhausted.
+        If preferred_model is provided and not 'auto', prioritizes that specific model first.
+        """
         with self._lock:
             self.check_date_reset()
             ready = []
             rate_limited = []
             exhausted = []
-            for m in CASCADE_MODELS_DEF:
+
+            # Determine base list
+            all_defs = list(CASCADE_MODELS_DEF)
+            if preferred_model and preferred_model != "auto":
+                # Find matching model and put at front of list
+                pref_obj = next((m for m in all_defs if m["id"] == preferred_model), None)
+                if pref_obj:
+                    all_defs.remove(pref_obj)
+                    all_defs.insert(0, pref_obj)
+                elif preferred_model.startswith("gemini"):
+                    all_defs.insert(0, {"id": preferred_model, "daily_limit": 1500})
+
+            for m in all_defs:
                 mid = m["id"]
                 status = self.data["models"].get(mid, {}).get("status", "ready")
                 if status == "ready":
@@ -154,7 +236,7 @@ class GeminiQuotaTracker:
                     exhausted.append(mid)
             # Prioritize ready -> rate_limited -> exhausted
             ordered = ready + rate_limited + exhausted
-            return ordered if ordered else [m["id"] for m in CASCADE_MODELS_DEF]
+            return ordered if ordered else [m["id"] for m in all_defs]
 
     def get_status(self):
         with self._lock:
@@ -184,6 +266,8 @@ class GeminiQuotaTracker:
                     "id": mid,
                     "name": m["name"],
                     "tier": m["tier"],
+                    "avg_speed": m.get("avg_speed", "~1s"),
+                    "desc": m.get("desc", ""),
                     "used": used,
                     "limit": limit,
                     "remaining": remaining,

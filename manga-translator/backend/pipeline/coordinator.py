@@ -128,9 +128,24 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
         unload_ollama_models()
         translated = translate_texts_google(texts_to_translate, source_lang, target_lang)
     else:
-        # Default Gemini Flash with auto fallback to Google Translate
+        # Gemini (Auto Cascade or Specific Model) with auto fallback to Google Translate
         unload_ollama_models()
-        translated = translate_batch_gemini(texts_to_translate, source_lang, target_lang)
+        preferred_model = None
+        if translator:
+            tr_str = str(translator).strip()
+            if tr_str.startswith("gemini:"):
+                preferred_model = tr_str.split(":", 1)[1].strip()
+            elif tr_str.startswith("gemini-"):
+                preferred_model = tr_str
+            elif tr_str != "gemini":
+                preferred_model = None
+
+        translated = translate_batch_gemini(
+            texts_to_translate, 
+            source_lang, 
+            target_lang, 
+            preferred_model=preferred_model
+        )
         if not translated or all(t == orig for t, orig in zip(translated, texts_to_translate)):
             translated = translate_texts_google(texts_to_translate, source_lang, target_lang)
     t_trans = time.time()
