@@ -1,12 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Manga Universal Translator",
-  "version": "1.5",
+  "version": "1.6",
   "description": "แปลรูปภาพมังงะผ่านปุ่มสั่งการตรง สเกลเนียนตา ไร้ปัญหาวนลูป",
   "permissions": [
     "activeTab",
     "scripting"
   ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   },

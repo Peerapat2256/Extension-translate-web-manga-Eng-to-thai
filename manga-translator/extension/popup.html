@@ -69,15 +69,13 @@
 </head>
 <body>
   <div class="title">Manga Translator</div>
-  
   <label class="label">โมเดลแปลภาษา (Model)</label>
   <select id="model-select">
-    <option value="gemini">Gemini 2.5 Flash (แนะนำ)</option>
-    <option value="google_translate">Google Translate Directly</option>
-    <option value="llama3:8b">Local: Llama 3 8B (Ollama)</option>
-    <option value="gemma2:9b">Local: Gemma 2 9B (Ollama)</option>
-    <option value="qwen3:8b">Local: Qwen 3 8B (Ollama)</option>
-    <option value="qwen2.5:3b">Local: Qwen 2.5 3B (Ollama)</option>
+    <option value="gemini">✨ Gemini 2.5 Flash (AI ภาษาการ์ตูน - แนะนำ เร็วสุด)</option>
+    <option value="local_gemma2">💻 Local AI: Gemma 2 9B (ฉลาดเทียบเท่า Gemini - ออฟไลน์)</option>
+    <option value="local_qwen3">💻 Local AI: Qwen 3 8B (โมเดล Qwen - ออฟไลน์)</option>
+    <option value="local_qwen25">⚡ Local AI: Qwen 2.5 3B (เบาเร็ว - ออฟไลน์)</option>
+    <option value="google_translate">🌐 Google Translate (เร็ว ตรงตัว)</option>
   </select>
 
   <button id="translate-btn">แปลหน้านี้ (Translate)</button>

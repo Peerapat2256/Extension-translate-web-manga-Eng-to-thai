@@ -53,11 +53,37 @@ if not exist "%APP_PATH%" (
     exit /b 1
 )
 
+REM 4. Check and Free Port 8000 if occupied
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do (
+    echo [WARNING] Port 8000 is currently occupied by PID %%a.
+    taskkill /F /PID %%a >nul 2>&1
+    timeout /t 1 /nobreak >nul
+)
+
+REM 5. Check and Start Ollama Service if not running
+curl -s -m 1 http://127.0.0.1:11434/api/tags >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [STATUS] Ollama AI server is offline. Starting Ollama in background...
+    set OLLAMA_EXE=%LOCALAPPDATA%\Programs\Ollama\ollama.exe
+    if exist "%OLLAMA_EXE%" (
+        start "" "%OLLAMA_EXE%" serve
+    ) else (
+        where ollama >nul 2>nul
+        if %errorlevel% equ 0 (
+            start "" ollama serve
+        )
+    )
+    timeout /t 2 /nobreak >nul
+) else (
+    echo [STATUS] Ollama AI server is active and ready.
+)
+
 echo [STATUS] Starting Manga Translator Backend Server
 echo [INFO] Python Path: "%PYTHON_EXE%"
 echo [INFO] App Path:    "%APP_PATH%"
 echo.
 
+set PYTHONIOENCODING=utf-8
 "%PYTHON_EXE%" "%APP_PATH%"
 
 if %errorlevel% neq 0 (

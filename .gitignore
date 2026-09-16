@@ -1,3 +1,21 @@
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Temporary and downloaded assets
+downloads/
+output/
+scratch/
+manga-translator/downloads/
+manga-translator/output/
+manga-translator/scratch/
+
+# Large pre-trained neural network weights (auto-downloaded by backend on first run)
+manga-translator/backend/models/
+*.onnx
+
+# OS files
+.DS_Store
+Thumbs.db
