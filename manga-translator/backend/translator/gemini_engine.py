@@ -120,11 +120,11 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th", prefe
             continue
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "Quota" in err_str or "quota" in err_str:
-                quota_tracker.record_exhausted(model_name, err_str)
-                print(f"[Translator] Gemini model [{model_name}] QUOTA EXHAUSTED (429). Auto-cascading to next model...")
+            quota_tracker.record_error(model_name, err_str)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print(f"[Translator] Gemini model [{model_name}] hit rate limit (429/RPM). Auto-cascading to next model...")
             else:
-                print(f"[Translator] Gemini model [{model_name}] unavailable ({e}). Cascading to next model...")
+                print(f"[Translator] Gemini model [{model_name}] temporary unavailable ({e}). Cascading to next model...")
             continue
                 
     # Auto-fallback to Google Translate for any missing/untranslated items

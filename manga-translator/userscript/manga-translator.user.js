@@ -787,6 +787,20 @@ function createToggleUI() {
     totalSummaryBadge.innerHTML = `<span>โควต้ารวม 9 รุ่น:</span><strong id="manga-gemini-total-rem">กำลังโหลด...</strong>`;
     settingsPanel.appendChild(totalSummaryBadge);
 
+    // คำอธิบายทำความเข้าใจโควต้า Google (RPD 1,500 vs RPM 15)
+    const quotaTip = document.createElement('div');
+    quotaTip.style.cssText = `
+        font-size: 9.5px;
+        color: #94a3b8;
+        line-height: 1.35;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 5px;
+        padding: 5px 8px;
+        border-left: 2px solid #38bdf8;
+    `;
+    quotaTip.innerHTML = `💡 <b>โควต้าจริง:</b> แต่ละรุ่นมี <b>1,500 หน้า/วัน</b> (รวม 13,500 หน้า)<br>⚡ มีลิมิตความถี่ <b>15 หน้า/นาที (RPM)</b> หากอ่านเร็วติด 15 หน้า ระบบจะพัก 1 นาทีแล้วกลับมาใช้ต่อได้อัตโนมัติ`;
+    settingsPanel.appendChild(quotaTip);
+
     // ปุ่มสลับโหมด Auto Cascade
     const autoCascadeBtn = document.createElement('div');
     autoCascadeBtn.id = 'manga-auto-cascade-btn';
@@ -924,16 +938,22 @@ function createToggleUI() {
             `;
 
             let badgeHtml = '';
-            if (m.status === 'ready') {
-                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-weight:600;">พร้อมใช้</span>`;
-            } else if (m.status === 'exhausted') {
-                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:600;">โควต้าหมดแล้ว</span>`;
+            const isRateLimited = (m.status === 'rate_limited' || (m.status === 'exhausted' && m.used < m.limit));
+            const isTrulyExhausted = (m.status === 'exhausted' && m.used >= m.limit);
+
+            if (isTrulyExhausted) {
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:600;">ครบ 1,500/วันแล้ว</span>`;
+            } else if (isRateLimited) {
+                const secs = (m.rate_limit_secs && m.rate_limit_secs > 0) ? ` (${m.rate_limit_secs} วิ)` : '';
+                badgeHtml = `<span title="ติดลิมิตความถี่ 15 หน้า/นาทีของ Google พัก 1 นาทีแล้วกลับมาใช้ได้ต่อ (โควต้า 1,500 ยังเหลือ)" style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); font-weight:600; cursor:help;">🟡 ติด RPM พัก 1 นาที${secs}</span>`;
+            } else if (m.status === 'ready') {
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-weight:600;">🟢 พร้อมใช้</span>`;
             } else {
-                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); font-weight:600;">ติด Rate Limit</span>`;
+                badgeHtml = `<span style="font-size:9px; padding:1px 6px; border-radius:10px; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); font-weight:600;">พักชั่วคราว</span>`;
             }
 
             const pct = Math.min(100, Math.round((m.used / m.limit) * 100));
-            const barColor = (m.status === 'exhausted') ? '#ef4444' : (pct > 80 ? '#f59e0b' : '#38bdf8');
+            const barColor = isTrulyExhausted ? '#ef4444' : (isRateLimited ? '#fbbf24' : (pct > 80 ? '#f59e0b' : '#38bdf8'));
             const speedText = m.avg_speed || '~1s';
             const descText = m.desc || '';
 
@@ -1013,14 +1033,29 @@ function createToggleUI() {
         settingsBtn.style.color = '#94a3b8';
         settingsBtn.style.transform = 'rotate(0deg)';
     });
+    let quotaPollInterval = null;
     settingsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (settingsPanel.style.display === 'none' || settingsPanel.style.display === '') {
             settingsPanel.style.display = 'flex';
             ipInput.focus();
             fetchAndRenderGeminiQuota();
+            if (!quotaPollInterval) {
+                quotaPollInterval = setInterval(() => {
+                    if (settingsPanel && settingsPanel.style.display !== 'none') {
+                        fetchAndRenderGeminiQuota();
+                    } else if (quotaPollInterval) {
+                        clearInterval(quotaPollInterval);
+                        quotaPollInterval = null;
+                    }
+                }, 5000);
+            }
         } else {
             settingsPanel.style.display = 'none';
+            if (quotaPollInterval) {
+                clearInterval(quotaPollInterval);
+                quotaPollInterval = null;
+            }
         }
     });
     controlsRow.appendChild(settingsBtn);
