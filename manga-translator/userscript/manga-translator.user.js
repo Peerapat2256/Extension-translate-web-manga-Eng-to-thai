@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manga Universal Translator
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.5
 // @description  แปลภาษาภาพมังงะโดยส่งไปประมวลผลที่คอมพิวเตอร์หลัก (สำหรับ Safari iOS และโปรแกรมจัดการสคริปต์)
 // @author       Antigravity
 // @match        *://*/*
@@ -235,7 +235,7 @@ function isNonMangaAsset(img) {
 
     // 2. อยู่ใน Container ที่เป็น UI เว็บ ไม่ใช่เนื้อหาตอนมังงะ
     try {
-        if (img.closest('header, footer, nav, aside, .comment, .comments, #comments, .disqus, .sidebar, .menu, .ad-container, .adsbygoogle')) {
+        if (img.closest('#manga-translator-ui-container, header, footer, nav, aside, .comment, .comments, #comments, .disqus, .sidebar, .menu, .ad-container, .adsbygoogle')) {
             return true;
         }
     } catch (e) {}
@@ -288,19 +288,33 @@ function getSortedMangaImages() {
         return src.length > 15;
     });
 
-    // เรียงลำดับจากบนสุดของหน้าเว็บลงมาล่างสุด (Top-to-Bottom)
-    mangaImgs.sort((a, b) => {
-        const topA = a.getBoundingClientRect().top + window.scrollY;
-        const topB = b.getBoundingClientRect().top + window.scrollY;
-        return topA - topB;
-    });
+    if (mangaImgs.length <= 1) return mangaImgs;
 
-    return mangaImgs;
+    // คำนวณตำแหน่ง top เพียงครั้งเดียวต่อรูป (Single Layout Pass) เพื่อป้องกัน Layout Thrashing และอาการหน้าเว็บค้าง
+    const scrollY = window.scrollY;
+    const items = mangaImgs.map(img => ({
+        img,
+        top: img.getBoundingClientRect().top + scrollY
+    }));
+
+    items.sort((a, b) => a.top - b.top);
+    return items.map(item => item.img);
 }
 
 // หาตำแหน่งหน้าที่ผู้ใช้กำลังอ่านอยู่ตามตำแหน่งการเลื่อนจอ (Current Viewport Reading Index)
 function findCurrentReadingIndex(images) {
     if (!images || images.length === 0) return 0;
+
+    // หากแท็บถูกพับไปเบื้องหลัง ไม่ต้องคำนวณตำแหน่ง Layout เพื่อลดภาระเบราว์เซอร์
+    if (document.hidden) {
+        for (let i = 0; i < images.length; i++) {
+            if (images[i].dataset.mangaStatus !== "translated" && images[i].dataset.mangaStatus !== "ignored") {
+                return i;
+            }
+        }
+        return 0;
+    }
+
     const viewTop = window.scrollY;
     const viewMid = viewTop + (window.innerHeight * 0.35);
 
@@ -309,8 +323,8 @@ function findCurrentReadingIndex(images) {
 
     for (let i = 0; i < images.length; i++) {
         const rect = images[i].getBoundingClientRect();
-        const imgTop = rect.top + window.scrollY;
-        const imgBottom = rect.bottom + window.scrollY;
+        const imgTop = rect.top + viewTop;
+        const imgBottom = rect.bottom + viewTop;
 
         if (imgTop <= viewMid && imgBottom >= viewMid) {
             return i;
@@ -361,6 +375,7 @@ async function ensureImageReady(img) {
 
 // ตัวแปรควบคุมระบบแปลอัตโนมัติตามหน้าที่เว็บโหลดไว้ (Adaptive Preload Supervisor)
 let scrollDebounceTimer = null;
+let domMutationTimeout = null;
 let supervisorWakeupResolver = null;
 let domMutationObserver = null;
 
@@ -434,6 +449,12 @@ async function translationSupervisorLoop() {
 
     try {
         while (isTranslationEnabled) {
+            // หากแท็บถูกพับไปเบื้องหลัง (Background Tab) หน่วงเวลาเพื่อประหยัด CPU และไม่ให้เบราว์เซอร์ตัดการทำงาน
+            if (document.hidden) {
+                await sleepOrWake(800);
+                if (!isTranslationEnabled) break;
+            }
+
             // หากเซิร์ฟเวอร์ Cloud กำลังตื่น (Cold Start) ให้รอจนกว่าจะตื่นเสร็จ เพื่อไม่ให้ส่งรูปไปค้าง
             if (isCloudServerWakingUp) {
                 const textSpan = document.querySelector('#manga-translator-btn span:last-child');
@@ -454,7 +475,11 @@ async function translationSupervisorLoop() {
             for (let i = 0; i < mangaImages.length; i++) {
                 const img = mangaImages[i];
                 if (img.dataset.mangaStatus === "translated") {
-                    const transSrc = img.dataset.translatedSrc || (img.dataset.translatedDataUrl ? base64ToBlobUrl(img.dataset.translatedDataUrl) : null);
+                    let transSrc = img.dataset.translatedSrc;
+                    if (!transSrc && img.dataset.translatedDataUrl) {
+                        transSrc = base64ToBlobUrl(img.dataset.translatedDataUrl);
+                        img.dataset.translatedSrc = transSrc;
+                    }
                     if (transSrc && img.src !== transSrc) {
                         if (img.srcset) {
                             if (!img.dataset.originalSrcset) img.dataset.originalSrcset = img.srcset;
@@ -470,20 +495,23 @@ async function translationSupervisorLoop() {
             // 1. หาตำแหน่งหน้าที่ผู้ใช้อ่านอยู่จริง ณ ขณะนี้ (Viewport Reading Index)
             const currIdx = findCurrentReadingIndex(mangaImages);
 
-            // 2. กระตุ้นให้เบราว์เซอร์ดาวน์โหลดภาพใกล้สายตาล่วงหน้า (Eager Load Near Viewport)
-            for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 6); i++) {
-                const img = mangaImages[i];
-                if (img.loading === 'lazy') img.loading = 'eager';
-                if (img.hasAttribute('loading')) img.removeAttribute('loading');
-            }
+            // 2. กระตุ้นให้เบราว์เซอร์ดาวน์โหลดภาพใกล้สายตาล่วงหน้า (เฉพาะเมื่อเปิดดูแท็บ)
+            if (!document.hidden) {
+                for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 6); i++) {
+                    const img = mangaImages[i];
+                    if (img.loading === 'lazy') img.loading = 'eager';
+                    if (img.hasAttribute('loading')) img.removeAttribute('loading');
+                }
 
-            // 3. ใส่เอฟเฟกต์เบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
-            for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 5); i++) {
-                const img = mangaImages[i];
-                if (img.dataset.mangaStatus !== "translated" && img.dataset.mangaStatus !== "processing") {
-                    if (isImageLoadedAndReady(img)) {
-                        img.style.transition = "filter 0.4s ease-in-out";
-                        img.style.filter = "blur(6px) grayscale(15%)";
+                // 3. ใส่เอฟผลเบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
+                for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 5); i++) {
+                    const img = mangaImages[i];
+                    if (img.dataset.mangaStatus !== "translated" && img.dataset.mangaStatus !== "processing") {
+                        if (isImageLoadedAndReady(img) && !img.dataset.mangaBlurred) {
+                            img.dataset.mangaBlurred = "true";
+                            img.style.transition = "filter 0.4s ease-in-out";
+                            img.style.filter = "blur(6px) grayscale(15%)";
+                        }
                     }
                 }
             }
@@ -499,33 +527,38 @@ async function translationSupervisorLoop() {
                 // หากทุกหน้าที่เว็บโหลดมา ณ ปัจจุบันแปลครบหมดแล้ว
                 const textSpan = document.querySelector('#manga-translator-btn span:last-child');
                 if (textSpan && isTranslationEnabled) {
-                    if (translatedCount >= mangaImages.length) {
-                        textSpan.innerText = `แปลครบทุกหน้าแล้ว (${mangaImages.length} หน้า)`;
-                    } else {
-                        textSpan.innerText = `พร้อมอ่าน (แปลแล้ว ${translatedCount}/${mangaImages.length} หน้า - เลื่อนลงเพื่อแปลต่อ)`;
+                    const msg = (translatedCount >= mangaImages.length)
+                        ? `แปลครบทุกหน้าแล้ว (${mangaImages.length} หน้า)`
+                        : `พร้อมอ่าน (แปลแล้ว ${translatedCount}/${mangaImages.length} หน้า - เลื่อนลงเพื่อแปลต่อ)`;
+                    if (textSpan.innerText !== msg) {
+                        textSpan.innerText = msg;
                     }
                 }
                 // พักรอจนกว่าผู้ใช้จะเลื่อนจอ หรือเว็บจะโหลดภาพถัดไปเพิ่ม
-                await sleepOrWake(400);
+                await sleepOrWake(document.hidden ? 1200 : 400);
                 continue;
             }
 
             const targetImg = target.img;
             const targetIdx = target.index;
 
-            // 5. อัปเดตสถานะปุ่มลอย แสดงความคืบหน้าแบบ Real-Time
+            // 5. อัปเดตสถานะปุ่มลอย แสดงความคืบหน้าแบบ Real-Time (อัปเดตเฉพาะเมื่อข้อความเปลี่ยนจริง)
             const textSpan = document.querySelector('#manga-translator-btn span:last-child');
             if (textSpan && isTranslationEnabled) {
-                textSpan.innerText = `กำลังแปลหน้า ${targetIdx + 1}/${mangaImages.length} (โหลดแล้ว ${loadedCount} หน้า)...`;
+                const msg = `กำลังแปลหน้า ${targetIdx + 1}/${mangaImages.length} (โหลดแล้ว ${loadedCount} หน้า)...`;
+                if (textSpan.innerText !== msg) {
+                    textSpan.innerText = msg;
+                }
             }
 
             // 6. ส่งแปลภาพนี้ทันที (มั่นใจได้ 100% ว่าภาพพร้อม ไม่มีบัคค้าง)
             targetImg.dataset.mangaStatus = "processing";
+            delete targetImg.dataset.mangaBlurred;
             await startSingleImageTranslation(targetImg);
             targetImg.style.filter = "none";
 
-            // สลับไปหน้าถัดไปทันที และรอบถัดไปจะดึงพิกัดสายตาล่าสุดและตรวจจับรูปใหม่อัตโนมัติ
-            await new Promise(r => setTimeout(r, 80));
+            // สลับไปหน้าถัดไปทันที (ให้ Event Loop หายใจ ป้องกันหน้าจอค้าง)
+            await new Promise(r => setTimeout(r, document.hidden ? 300 : 100));
         }
     } catch (err) {
         console.error('[Manga Translator] Supervisor translation loop error:', err);
@@ -539,13 +572,72 @@ function handleReadingScroll() {
     if (!isTranslationEnabled) return;
     clearTimeout(scrollDebounceTimer);
     scrollDebounceTimer = setTimeout(() => {
-        if (isTranslationEnabled) {
+        if (isTranslationEnabled && !document.hidden) {
             wakeSupervisor();
             if (!isTranslatingLoopRunning) {
                 translationSupervisorLoop();
             }
         }
-    }, 100);
+    }, 120);
+}
+
+// ตรวจจับเมื่อผู้ใช้สลับแท็บเข้า-ออก (Visibility Change Lifecycle)
+function handleTabVisibilityChange() {
+    if (!isTranslationEnabled) return;
+    if (!document.hidden) {
+        // เมื่อผู้ใช้สลับกลับมาที่แท็บ ให้ปลุก supervisor ทันทีอย่างนุ่มนวล
+        setTimeout(() => {
+            if (isTranslationEnabled) {
+                wakeSupervisor();
+                if (!isTranslatingLoopRunning) {
+                    translationSupervisorLoop();
+                }
+            }
+        }, 150);
+    }
+}
+
+// ตั้งค่า MutationObserver ตรวจจับภาพใหม่ พร้อมระบบกรองและ Debounce ป้องกัน Infinite Loop 100%
+function setupMutationObserver() {
+    if (domMutationObserver) return;
+
+    domMutationObserver = new MutationObserver((mutations) => {
+        if (!isTranslationEnabled || isInternalSrcChange) return;
+
+        // ถ้าแท็บอยู่ในพื้นหลัง (document.hidden) ให้เบราว์เซอร์ทำงานเบาที่สุด ไม่ต้องปลุกทันที
+        if (document.hidden) return;
+
+        // กรองการเปลี่ยนแปลงที่เกิดจาก UI หรือ Toast ของตัวส่วนขยายเอง
+        let hasRelevantChange = false;
+        for (let i = 0; i < mutations.length; i++) {
+            const m = mutations[i];
+            const target = m.target;
+            if (target && target.nodeType === 1) {
+                if (target.id === 'manga-translator-ui-container' ||
+                    (target.closest && target.closest('#manga-translator-ui-container'))) {
+                    continue;
+                }
+            }
+            hasRelevantChange = true;
+            break;
+        }
+
+        if (!hasRelevantChange) return;
+
+        // Debounce 400ms ป้องกันการยิงคำขอซ้ำรัวๆ
+        clearTimeout(domMutationTimeout);
+        domMutationTimeout = setTimeout(() => {
+            if (isTranslationEnabled && !document.hidden) {
+                wakeSupervisor();
+            }
+        }, 400);
+    });
+
+    domMutationObserver.observe(document.body, { 
+        childList: true, 
+        subtree: true,
+        attributes: false
+    });
 }
 
 // เริ่มต้นระบบแปลอัตโนมัติตามหน้าที่เว็บโหลดไว้
@@ -553,18 +645,14 @@ async function startSequentialChapterTranslation() {
     window.removeEventListener('scroll', handleReadingScroll);
     window.addEventListener('scroll', handleReadingScroll, { passive: true });
 
+    document.removeEventListener('visibilitychange', handleTabVisibilityChange);
+    document.addEventListener('visibilitychange', handleTabVisibilityChange);
+
     // คืนรูปแปลทันทีสำหรับหน้าที่เคยแปลเสร็จแล้ว (Instant Fast Switch)
     updateOverlaysVisibility();
 
     // ตรวจจับเมื่อเว็บโหลดภาพใหม่เข้ามาใน DOM
-    if (!domMutationObserver) {
-        domMutationObserver = new MutationObserver(() => {
-            if (isTranslationEnabled) {
-                wakeSupervisor();
-            }
-        });
-        domMutationObserver.observe(document.body, { childList: true, subtree: true });
-    }
+    setupMutationObserver();
 
     // หากใช้ Cloud Server ให้เริ่มปลุกเซิร์ฟเวอร์แบบเบื้องหลังทันที
     if (localStorage.getItem('manga_backend_source') === 'cloud') {
@@ -577,10 +665,12 @@ async function startSequentialChapterTranslation() {
 // ฟังก์ชันหยุดและกู้คืนรูปต้นฉบับทั้งหมดทันทีเมื่อผู้ใช้กดปิด (ดูต้นฉบับ)
 function stopSequentialChapterTranslation() {
     window.removeEventListener('scroll', handleReadingScroll);
+    document.removeEventListener('visibilitychange', handleTabVisibilityChange);
     if (domMutationObserver) {
         domMutationObserver.disconnect();
         domMutationObserver = null;
     }
+    clearTimeout(domMutationTimeout);
     isTranslatingLoopRunning = false;
     clearTimeout(scrollDebounceTimer);
     wakeSupervisor();
@@ -603,10 +693,12 @@ function stopSequentialChapterTranslation() {
 // ฟังก์ชันล้าง/รีเซ็ตการแปลทั้งหมด
 function resetTranslations() {
     window.removeEventListener('scroll', handleReadingScroll);
+    document.removeEventListener('visibilitychange', handleTabVisibilityChange);
     if (domMutationObserver) {
         domMutationObserver.disconnect();
         domMutationObserver = null;
     }
+    clearTimeout(domMutationTimeout);
     isTranslatingLoopRunning = false;
     clearTimeout(scrollDebounceTimer);
     wakeSupervisor();
@@ -615,6 +707,7 @@ function resetTranslations() {
     images.forEach(img => {
         if (img.dataset.mangaStatus && img.dataset.mangaStatus !== "ignored") {
             delete img.dataset.mangaStatus;
+            delete img.dataset.mangaBlurred;
             const original = img.dataset.originalSrc || img.dataset.originalDataUrl;
             if (original) {
                 img.src = original;
