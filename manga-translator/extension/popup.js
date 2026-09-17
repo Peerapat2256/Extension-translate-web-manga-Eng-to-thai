@@ -93,7 +93,8 @@ function runPureDirectTranslation(selectedModel) {
                     body: JSON.stringify({ 
                         image_base64: base64Data,
                         source_lang: localStorage.getItem('manga_source_lang') || 'en',
-                        translation_model: selectedModel || 'gemini'
+                        translation_model: selectedModel || 'gemini',
+                        engine_mode: localStorage.getItem('manga_engine_mode') || 'vision'
                     })
                 });
  

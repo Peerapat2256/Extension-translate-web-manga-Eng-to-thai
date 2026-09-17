@@ -652,6 +652,76 @@ function createToggleUI() {
         color: #f8fafc;
     `;
 
+    // ส่วนตั้งค่าระบบประมวลผล (OCR & Vision Engine Mode)
+    const engineTitle = document.createElement('div');
+    engineTitle.style.cssText = `
+        font-size: 11px;
+        font-weight: 700;
+        color: #38bdf8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    `;
+    engineTitle.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> ระบบประมวลผล (Engine)`;
+    settingsPanel.appendChild(engineTitle);
+
+    const engineSelect = document.createElement('select');
+    engineSelect.id = 'manga-engine-mode-select';
+    engineSelect.style.cssText = `
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 6px;
+        padding: 6px 8px;
+        color: #f8fafc;
+        font-size: 11px;
+        font-weight: 600;
+        outline: none;
+        cursor: pointer;
+        font-family: inherit;
+        transition: all 0.2s;
+    `;
+
+    const engineOptions = [
+        { value: 'vision', label: '✨ Gemini Multimodal Vision (สเตเบิล / แนะนำ - สวยงามคมชัด)' },
+        { value: 'offline_ocr', label: '🖥️ ระบบเดิม: Offline OCR ในเครื่อง (Comic-Text + EasyOCR)' }
+    ];
+
+    engineOptions.forEach(optData => {
+        const opt = document.createElement('option');
+        opt.value = optData.value;
+        opt.innerText = optData.label;
+        opt.style.background = '#0f172a';
+        opt.style.color = '#f8fafc';
+        engineSelect.appendChild(opt);
+    });
+
+    if (!localStorage.getItem('manga_engine_mode')) {
+        localStorage.setItem('manga_engine_mode', 'vision');
+    }
+    engineSelect.value = localStorage.getItem('manga_engine_mode') || 'vision';
+
+    engineSelect.addEventListener('change', () => {
+        const newEngine = engineSelect.value;
+        localStorage.setItem('manga_engine_mode', newEngine);
+        console.log('[Manga Translator] Switched engine mode to:', newEngine);
+        resetTranslations();
+        if (isTranslationEnabled) {
+            startSequentialChapterTranslation();
+        }
+    });
+    settingsPanel.appendChild(engineSelect);
+
+    const engineDivider = document.createElement('div');
+    engineDivider.style.cssText = `
+        width: 100%;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.12);
+        margin: 4px 0;
+    `;
+    settingsPanel.appendChild(engineDivider);
+
     const settingsTitle = document.createElement('div');
     settingsTitle.style.cssText = `
         font-size: 11px;
@@ -1507,12 +1577,14 @@ async function startSingleImageTranslation(img) {
         }
         const cleanServerUrl = serverUrl.replace(/\/$/, '');
 
-        // ตรวจสอบโมเดลก่อนส่ง
+        // ตรวจสอบโมเดลและระบบประมวลผลก่อนส่ง
         const currentModel = localStorage.getItem('manga_translation_model') || 'gemini';
+        const currentEngine = localStorage.getItem('manga_engine_mode') || 'vision';
         const requestPayload = { 
             image_base64: base64Data,
             source_lang: localStorage.getItem('manga_source_lang') || 'en',
-            translation_model: currentModel
+            translation_model: currentModel,
+            engine_mode: currentEngine
         };
 
         let data = null;
@@ -1613,9 +1685,11 @@ async function startSingleImageTranslation(img) {
             }
         }
 
-        // หากผู้ใช้สลับโมเดลระหว่างส่งคำขอ ห้ามนำผลลัพธ์ของโมเดลเก่ามาแปะทับ
-        if (localStorage.getItem('manga_translation_model') !== currentModel) {
-            console.log('[Manga Translator] Ignored old model result after switch');
+        // หากผู้ใช้สลับโมเดลหรือระบบประมวลผลระหว่างส่งคำขอ ห้ามนำผลลัพธ์ของโมเดลเก่ามาแปะทับ
+        if (localStorage.getItem('manga_translation_model') !== currentModel ||
+            localStorage.getItem('manga_engine_mode') !== currentEngine) {
+            console.log('[Manga Translator] Ignored obsolete result after model/engine switch');
+            img.style.filter = "none";
             return;
         }
         

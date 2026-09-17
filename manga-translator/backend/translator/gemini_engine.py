@@ -164,6 +164,7 @@ def translate_manga_vision(img_pil, preferred_model=None, source_lang="en", targ
     prompt = f"""You are a master manga and comic translator.
 Detect every single text element in this manga page in natural reading order (top to bottom), including:
 - Speech bubbles and dialogue
+- Sub-dialogue, colored notes, italic commentary, and muttered lines inside or below speech bubbles (always detect them as their own separate items)
 - Speaker names outside bubbles (e.g. 'MOM', 'DAD') as their own separate text boxes
 - Narrative captions, sound effects, phone chat UI, titles, and translator notes
 
@@ -196,7 +197,26 @@ Output strictly as a JSON array of objects:
                 raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
                 raw_text = re.sub(r'\s*```$', '', raw_text)
             
-            items = json.loads(raw_text)
+            items = None
+            try:
+                items = json.loads(raw_text)
+            except Exception:
+                # 1. Clean trailing commas or unbalanced brackets
+                fixed = re.sub(r',\s*([\]\}])', r'\1', raw_text)
+                fixed = re.sub(r'\}\s*\}\s*\]', r'}]', fixed)
+                try:
+                    items = json.loads(fixed)
+                except Exception:
+                    # 2. Extract JSON objects using regex
+                    objs = re.findall(r'\{[^{}]*?"box_2d"[^{}]*?\}', raw_text, flags=re.DOTALL)
+                    if objs:
+                        items = []
+                        for obj_str in objs:
+                            try:
+                                items.append(json.loads(obj_str))
+                            except Exception:
+                                pass
+
             if isinstance(items, list) and len(items) > 0:
                 quota_tracker.record_usage(model_name)
                 print(f"[Translator] Gemini Vision [{model_name}] extracted & translated {len(items)} bubbles successfully.")

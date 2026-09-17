@@ -20,6 +20,7 @@ class MangaRequest(BaseModel):
     image_base64: str
     source_lang: str = "en"
     translation_model: str = "gemini"
+    engine_mode: str = "vision"
 
 @router.post("/translate_base64")
 def translate_base64_endpoint(data: MangaRequest):
@@ -29,8 +30,8 @@ def translate_base64_endpoint(data: MangaRequest):
         if len(raw_input) < 100:
             raise HTTPException(status_code=400, detail="Image payload is empty or too short")
 
-        # Cache check (Model & Lang aware cache key)
-        cache_key = hashlib.md5(f"{data.translation_model}_{data.source_lang}_{raw_input}".encode('utf-8')).hexdigest()
+        # Cache check (Engine, Model & Lang aware cache key)
+        cache_key = hashlib.md5(f"{data.engine_mode}_{data.translation_model}_{data.source_lang}_{raw_input}".encode('utf-8')).hexdigest()
         if cache_key in image_cache:
             return image_cache[cache_key]
             
@@ -90,7 +91,8 @@ def translate_base64_endpoint(data: MangaRequest):
         result_img, metadata = process_manga_image(
             img, 
             source_lang=data.source_lang, 
-            translator=data.translation_model
+            translator=data.translation_model,
+            engine_mode=data.engine_mode
         )
         
         # Encode result

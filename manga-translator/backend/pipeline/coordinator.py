@@ -33,15 +33,11 @@ def is_noise_box(text, box_w, box_h, conf):
         return True
     return False
 
-def process_manga_image(img_pil, source_lang="en", target_lang="th", translator="gemini"):
+def process_manga_image(img_pil, source_lang="en", target_lang="th", translator="gemini", engine_mode="vision"):
     """
     World-Class Manga Pipeline Coordinator:
-    1. Deep Learning Comic-Text-Detector (Exact text segmentation & inpaint mask)
-    2. High-Performance Offline Manga OCR (0.4s GPU batch, auto-angle & contrast boost)
-    3. Hierarchical Bubble Clustering (Sentence Assembly per Bubble)
-    4. One-Pass Precision Polygon Stroke Inpainting (Zero floating boxes, 100% art preservation)
-    5. High-Throughput Batch Translation (Gemini Singleton + Parallel Google Fallback)
-    6. Shape-Aware Dynamic Typesetting
+    - Mode 'vision': High-Precision Gemini Multimodal Vision (Single-pass OCR + Translation + Spotless Inpainting)
+    - Mode 'offline_ocr': Deep Learning Comic-Text-Detector + EasyOCR + LLM/Google/Ollama Translation
     """
     t0 = time.time()
     if img_pil.mode != "RGB":
@@ -51,8 +47,12 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
     # 1. High-Precision Gemini Multimodal Vision Pipeline (Single-pass OCR + Dialogue Translation)
-    is_gemini_mode = (not translator or translator == "gemini" or str(translator).startswith("gemini"))
-    if is_gemini_mode:
+    is_vision_mode = (engine_mode in ["vision", "multimodal", "gemini_vision", None])
+    # If the user selected local models, prefer offline OCR directly
+    if translator and str(translator).startswith("local"):
+        is_vision_mode = False
+
+    if is_vision_mode:
         preferred_model = None
         tr_str = str(translator).strip()
         if tr_str.startswith("gemini:"):
@@ -78,10 +78,24 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
             
             for item in vision_items:
                 box = item.get("box_2d", [0, 0, 0, 0])
-                y1 = int(box[0] * h_img / 1000.0)
-                x1 = int(box[1] * w_img / 1000.0)
-                y2 = int(box[2] * h_img / 1000.0)
-                x2 = int(box[3] * w_img / 1000.0)
+                if isinstance(box, dict):
+                    box = [
+                        box.get("ymin", box.get("y1", 0)),
+                        box.get("xmin", box.get("x1", 0)),
+                        box.get("ymax", box.get("y2", 0)),
+                        box.get("xmax", box.get("x2", 0))
+                    ]
+                while isinstance(box, (list, tuple)) and len(box) == 1 and isinstance(box[0], (list, tuple)):
+                    box = box[0]
+                if not isinstance(box, (list, tuple)) or len(box) < 4:
+                    continue
+                try:
+                    y1 = int(float(box[0]) * h_img / 1000.0)
+                    x1 = int(float(box[1]) * w_img / 1000.0)
+                    y2 = int(float(box[2]) * h_img / 1000.0)
+                    x2 = int(float(box[3]) * w_img / 1000.0)
+                except Exception:
+                    continue
                 
                 if x2 <= x1 or y2 <= y1:
                     continue
