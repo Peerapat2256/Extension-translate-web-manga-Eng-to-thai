@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manga Universal Translator
 // @namespace    http://tampermonkey.net/
-// @version      2.6
+// @version      2.7
 // @description  แปลภาษาภาพมังงะโดยส่งไปประมวลผลที่คอมพิวเตอร์หลัก (สำหรับ Safari iOS และโปรแกรมจัดการสคริปต์)
 // @author       Antigravity
 // @match        *://*/*
@@ -46,6 +46,91 @@ function getActiveServerUrl() {
         url = (source === 'cloud' ? 'https://' : 'http://') + url;
     }
     return url.replace(/\/$/, '');
+}
+
+// ตรวจสอบฟังก์ชันเครือข่ายสำหรับ Userscript (Tampermonkey, Safari Userscripts, Violentmonkey)
+function getGmXhrFunction() {
+    if (typeof GM_xmlhttpRequest === 'function') return GM_xmlhttpRequest;
+    if (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') return GM.xmlHttpRequest;
+    if (typeof window !== 'undefined') {
+        if (typeof window.GM_xmlhttpRequest === 'function') return window.GM_xmlhttpRequest;
+        if (window.GM && typeof window.GM.xmlHttpRequest === 'function') return window.GM.xmlHttpRequest;
+    }
+    return null;
+}
+
+function isUserscriptEnvironment() {
+    return getGmXhrFunction() !== null;
+}
+
+function isRealChromeExtension() {
+    // หากพบ GM XHR แสดงว่ากำลังทำงานใน Userscript (Tampermonkey, Safari Userscripts) ห้ามใช้ chrome.runtime
+    if (isUserscriptEnvironment()) return false;
+    return (typeof chrome !== 'undefined' && 
+            chrome.runtime && 
+            typeof chrome.runtime.id === 'string' && 
+            chrome.runtime.id.length > 0 && 
+            typeof chrome.runtime.sendMessage === 'function');
+}
+
+function makeGmRequest(options) {
+    return new Promise((resolve, reject) => {
+        const gmFn = getGmXhrFunction();
+        if (!gmFn) {
+            return reject(new Error('GM XHR is not available in current environment'));
+        }
+
+        let settled = false;
+        const timeoutMs = options.timeout || 35000;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                reject(new Error(`GM request timed out (${Math.round(timeoutMs / 1000)}s)`));
+            }
+        }, timeoutMs + 3000);
+
+        const safeResolve = (val) => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve(val);
+            }
+        };
+
+        const safeReject = (err) => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                reject(err);
+            }
+        };
+
+        const config = {
+            ...options,
+            timeout: timeoutMs,
+            onload: (res) => {
+                if (options.onload) try { options.onload(res); } catch(e) {}
+                safeResolve(res);
+            },
+            onerror: (err) => {
+                if (options.onerror) try { options.onerror(err); } catch(e) {}
+                safeReject(err);
+            },
+            ontimeout: () => {
+                if (options.ontimeout) try { options.ontimeout(); } catch(e) {}
+                safeReject(new Error('GM request ontimeout event fired'));
+            }
+        };
+
+        try {
+            const ret = gmFn(config);
+            if (ret && typeof ret.then === 'function') {
+                ret.then(safeResolve).catch(safeReject);
+            }
+        } catch (callErr) {
+            safeReject(callErr);
+        }
+    });
 }
 
 // ระบบป้องกัน Render.com Free-Tier หลับ (Cold Start Waker & Toast Notifier)
@@ -143,7 +228,7 @@ async function warmUpCloudServer(force = false) {
     let detail = '';
 
     try {
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        if (isRealChromeExtension()) {
             const res = await new Promise(r => {
                 chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health`, timeout: 65000 }, resp => r(resp));
                 setTimeout(() => r(null), 65000);
@@ -153,24 +238,24 @@ async function warmUpCloudServer(force = false) {
                 detail = res.data.engine || res.data.status || 'Online';
             }
         }
-        if (!isOk && typeof GM_xmlhttpRequest !== 'undefined') {
-            const res = await new Promise(r => {
-                GM_xmlhttpRequest({
+        if (!isOk && isUserscriptEnvironment()) {
+            try {
+                const gmRes = await makeGmRequest({
                     method: 'GET',
                     url: `${targetUrl}/health`,
                     headers: { 'Accept': 'application/json' },
-                    timeout: 65000,
-                    onload: resp => {
-                        try { r(JSON.parse(resp.responseText)); } catch(e) { r(null); }
-                    },
-                    ontimeout: () => r(null),
-                    onerror: () => r(null)
+                    timeout: 65000
                 });
-            });
-            if (res && (res.status === 'online' || res.status === 'ok' || res.engine)) {
-                isOk = true;
-                detail = res.engine || res.status || 'Online';
-            }
+                if (gmRes && gmRes.responseText) {
+                    try {
+                        const parsed = JSON.parse(gmRes.responseText);
+                        if (parsed && (parsed.status === 'online' || parsed.status === 'ok' || parsed.engine)) {
+                            isOk = true;
+                            detail = parsed.engine || parsed.status || 'Online';
+                        }
+                    } catch(e) {}
+                }
+            } catch (e) {}
         }
         if (!isOk) {
             const controller = new AbortController();
@@ -504,7 +589,7 @@ async function translationSupervisorLoop() {
                     if (img.hasAttribute('loading')) img.removeAttribute('loading');
                 }
 
-                // 3. ใส่เอฟผลเบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
+                // 3. ใส่เอฟเฟกต์เบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
                 for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 5); i++) {
                     const img = mangaImages[i];
                     if (img.dataset.mangaStatus !== "translated" && img.dataset.mangaStatus !== "processing") {
@@ -1405,7 +1490,7 @@ function createToggleUI() {
         }
 
         try {
-            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            if (isRealChromeExtension()) {
                 const res = await new Promise(r => {
                     chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health`, timeout: testTimeout }, resp => r(resp));
                     setTimeout(() => r(null), testTimeout);
@@ -1415,24 +1500,24 @@ function createToggleUI() {
                     detail = res.data.engine || res.data.status || 'Online';
                 }
             }
-            if (!isOk && typeof GM_xmlhttpRequest !== 'undefined') {
-                const res = await new Promise(r => {
-                    GM_xmlhttpRequest({
+            if (!isOk && isUserscriptEnvironment()) {
+                try {
+                    const gmRes = await makeGmRequest({
                         method: 'GET',
                         url: `${targetUrl}/health`,
                         headers: { 'Accept': 'application/json' },
-                        timeout: testTimeout,
-                        onload: resp => {
-                            try { r(JSON.parse(resp.responseText)); } catch(e) { r(null); }
-                        },
-                        ontimeout: () => r(null),
-                        onerror: () => r(null)
+                        timeout: testTimeout
                     });
-                });
-                if (res && (res.status === 'online' || res.status === 'ok' || res.engine)) {
-                    isOk = true;
-                    detail = res.engine || res.status || 'Online';
-                }
+                    if (gmRes && gmRes.responseText) {
+                        try {
+                            const parsed = JSON.parse(gmRes.responseText);
+                            if (parsed && (parsed.status === 'online' || parsed.status === 'ok' || parsed.engine)) {
+                                isOk = true;
+                                detail = parsed.engine || parsed.status || 'Online';
+                            }
+                        } catch(e) {}
+                    }
+                } catch (e) {}
             }
             if (!isOk) {
                 const controller = new AbortController();
@@ -1607,34 +1692,28 @@ function createToggleUI() {
         setTimeout(() => { if (refreshSvg) refreshSvg.style.transform = 'rotate(0deg)'; }, 400);
 
         let data = null;
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        if (isRealChromeExtension()) {
             try {
                 const res = await new Promise((resolve) => {
                     chrome.runtime.sendMessage({ action: 'fetch_json', url: targetUrl }, (response) => {
-                        if (chrome.runtime.lastError || !response || !response.success) resolve(null);
+                        if (chrome.runtime && chrome.runtime.lastError || !response || !response.success) resolve(null);
                         else resolve(response.data);
                     });
                 });
                 if (res) data = res;
             } catch (e) {}
         }
-        if (!data && typeof GM_xmlhttpRequest !== 'undefined') {
+        if (!data && isUserscriptEnvironment()) {
             try {
-                data = await new Promise((resolve) => {
-                    GM_xmlhttpRequest({
-                        method: 'GET',
-                        url: targetUrl,
-                        headers: { 'Accept': 'application/json' },
-                        timeout: 5000,
-                        onload: (r) => {
-                            if (r.status >= 200 && r.status < 300) {
-                                try { resolve(JSON.parse(r.responseText)); } catch(err) { resolve(null); }
-                            } else resolve(null);
-                        },
-                        ontimeout: () => resolve(null),
-                        onerror: () => resolve(null)
-                    });
+                const gmRes = await makeGmRequest({
+                    method: 'GET',
+                    url: targetUrl,
+                    headers: { 'Accept': 'application/json' },
+                    timeout: 6000
                 });
+                if (gmRes && gmRes.status >= 200 && gmRes.status < 300 && gmRes.responseText) {
+                    try { data = JSON.parse(gmRes.responseText); } catch(err) { data = null; }
+                }
             } catch (e) {}
         }
         if (!data) {
@@ -2069,35 +2148,63 @@ function createToggleUI() {
 
 
 
-// ฟังก์ชันแปลง Blob เป็น Base64 Data URL
+// ฟังก์ชันแปลง Blob เป็น Base64 Data URL (รองรับ Blob, ArrayBuffer, Uint8Array และ Binary String อย่างปลอดภัย)
 function blobToDataUrl(blob) {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const res = reader.result;
-            if (typeof res === 'string' && res.startsWith('data:image/')) {
-                resolve(res);
-            } else {
-                reject(new Error('Invalid DataURL format'));
+        try {
+            if (!blob) return reject(new Error('Empty blob or response'));
+            if (typeof blob === 'string') {
+                if (blob.startsWith('data:image/')) {
+                    return resolve(blob);
+                }
+                const len = blob.length;
+                const u8 = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    u8[i] = blob.charCodeAt(i) & 0xff;
+                }
+                blob = new Blob([u8], { type: 'image/jpeg' });
+            } else if (blob instanceof ArrayBuffer) {
+                blob = new Blob([blob], { type: 'image/jpeg' });
+            } else if (blob && blob.buffer instanceof ArrayBuffer) {
+                blob = new Blob([blob.buffer], { type: 'image/jpeg' });
+            } else if (!(blob instanceof Blob)) {
+                return reject(new Error('Unsupported blob format'));
             }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const res = reader.result;
+                if (typeof res === 'string' && res.startsWith('data:image/')) {
+                    resolve(res);
+                } else {
+                    reject(new Error('Invalid DataURL format'));
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        } catch (err) {
+            reject(err);
+        }
     });
 }
 
 // ฟังก์ชันแปลง base64 เป็น local blob URL เพื่อความเร็วสูงสุดและป้องกันการวนลูป DOM
 function base64ToBlobUrl(base64) {
-    const parts = base64.split(';base64,');
-    const contentType = parts[0].split(':')[1];
-    const raw = window.atob(parts[1]);
-    const rawLength = raw.length;
-    const uInt8Array = new Uint8Array(rawLength);
-    for (let i = 0; i < rawLength; ++i) {
-        uInt8Array[i] = raw.charCodeAt(i);
+    try {
+        const parts = base64.split(';base64,');
+        const contentType = parts[0].split(':')[1];
+        const raw = window.atob(parts[1]);
+        const rawLength = raw.length;
+        const uInt8Array = new Uint8Array(rawLength);
+        for (let i = 0; i < rawLength; ++i) {
+            uInt8Array[i] = raw.charCodeAt(i);
+        }
+        const blob = new Blob([uInt8Array], { type: contentType });
+        return URL.createObjectURL(blob);
+    } catch (e) {
+        console.warn('[Manga Translator] base64ToBlobUrl failed:', e);
+        return null;
     }
-    const blob = new Blob([uInt8Array], { type: contentType });
-    return URL.createObjectURL(blob);
 }
 
 // ฟังก์ชันปรับขนาด/บีบอัด Base64 สำหรับภาพขนาดใหญ่พิเศษ (เช่น Webtoon แนวตั้งยาวหลายหมื่นพิกเซล)
@@ -2113,13 +2220,14 @@ async function compressBase64IfNeeded(dataUrl) {
     }
     try {
         const tempImg = new Image();
-        tempImg.crossOrigin = 'anonymous';
-        await new Promise((resolve, reject) => {
-            tempImg.onload = resolve;
-            tempImg.onerror = reject;
+        // ไม่ใส่ crossOrigin กับ data: URL เพื่อป้องกัน Safari WebKit บัคไม่โหลดรูป
+        const loaded = await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(false), 4000);
+            tempImg.onload = () => { clearTimeout(timer); resolve(true); };
+            tempImg.onerror = () => { clearTimeout(timer); resolve(false); };
             tempImg.src = dataUrl;
         });
-        if (!tempImg.naturalWidth || !tempImg.naturalHeight) {
+        if (!loaded || !tempImg.naturalWidth || !tempImg.naturalHeight) {
             return dataUrl;
         }
         const canvas = document.createElement('canvas');
@@ -2157,6 +2265,8 @@ async function fetchMangaImageAsBase64(url, img) {
 }
 
 async function _doFetchMangaImageRaw(url, img) {
+    if (!url) return null;
+
     // 1. กรณีเป็น blob: URL ให้ลองดึงผ่าน Canvas หรือ fetch ตรงในคอนเท็กซ์เดียวกัน
     if (url.startsWith('blob:')) {
         if (img && img.complete && img.naturalWidth >= 200 && img.naturalHeight >= 200) {
@@ -2177,7 +2287,7 @@ async function _doFetchMangaImageRaw(url, img) {
     }
 
     // 2. กรณี Chrome Extension ให้ส่ง Background Service Worker ดึงข้าม Origin ได้ 100% ไร้ CORS
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    if (isRealChromeExtension()) {
         try {
             const bgRes = await new Promise((resolve) => {
                 const timer = setTimeout(() => resolve(null), 25000);
@@ -2186,7 +2296,7 @@ async function _doFetchMangaImageRaw(url, img) {
                     url: url
                 }, (response) => {
                     clearTimeout(timer);
-                    if (chrome.runtime.lastError) {
+                    if (chrome.runtime && chrome.runtime.lastError) {
                         resolve(null);
                     } else {
                         resolve(response);
@@ -2201,35 +2311,45 @@ async function _doFetchMangaImageRaw(url, img) {
         }
     }
 
-    // 3. กรณี Tampermonkey Userscript ให้ดึงผ่าน GM_xmlhttpRequest ไร้ CORS
-    if (typeof GM_xmlhttpRequest !== 'undefined') {
+    // 3. กรณี Tampermonkey / Safari Userscript ให้ดึงผ่าน GM_xmlhttpRequest / GM.xmlHttpRequest ไร้ CORS
+    if (isUserscriptEnvironment()) {
         try {
-            const gmRes = await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: url,
-                    responseType: 'blob',
-                    timeout: 25000,
-                    onload: (res) => {
-                        if (res.status >= 200 && res.status < 300) {
-                            resolve(res.response);
-                        } else {
-                            reject(new Error(`HTTP ${res.status}`));
-                        }
-                    },
-                    onerror: reject,
-                    ontimeout: () => reject(new Error('GM fetch timeout'))
-                });
+            const gmRes = await makeGmRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'blob',
+                timeout: 25000
             });
-            if (gmRes) {
-                return await blobToDataUrl(gmRes);
+            if (gmRes && ((gmRes.status >= 200 && gmRes.status < 300) || gmRes.status === 0)) {
+                const responseData = gmRes.response || gmRes.responseText;
+                if (responseData) {
+                    const dataUrl = await blobToDataUrl(responseData);
+                    if (dataUrl && dataUrl.startsWith('data:image/')) {
+                        return dataUrl;
+                    }
+                }
             }
         } catch (gmErr) {
-            console.warn('[Manga Translator] GM_xmlhttpRequest image fetch error:', gmErr);
+            console.warn('[Manga Translator] GM image fetch error:', gmErr);
         }
     }
 
-    // 4. วิธีสำรอง: ลอง fetch ตรง
+    // 4. วิธีสำรอง: ลอง Canvas export (กรณีรูปโหลดเสร็จใน DOM แล้วและไม่ติด CORS Taint)
+    if (img && img.complete && img.naturalWidth >= 200 && img.naturalHeight >= 200) {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const canvasData = canvas.toDataURL('image/jpeg', 0.88);
+            if (canvasData && canvasData.startsWith('data:image/')) {
+                return canvasData;
+            }
+        } catch (canvasErr) {}
+    }
+
+    // 5. วิธีสำรอง: ลอง fetch ตรง
     try {
         const resp = await fetch(url);
         if (resp.ok) {
@@ -2238,18 +2358,101 @@ async function _doFetchMangaImageRaw(url, img) {
         }
     } catch (fetchErr) {}
 
-    // 5. วิธีสำรองสุดท้าย: Canvas export
-    if (img && img.complete && img.naturalWidth >= 200 && img.naturalHeight >= 200) {
+    return null;
+}
+
+// ฟังก์ชันกลางสำหรับส่งคำขอแปลภาพ รองรับ Chrome Extension Background, Userscript GM_xhr และ Direct Fetch
+async function sendTranslationRequest(cleanServerUrl, requestPayload, requestTimeoutMs) {
+    // วิธีที่ 1: ส่งผ่าน Extension Background Service Worker (เลี่ยงปัญหา CSP, CORS 100%)
+    if (isRealChromeExtension()) {
         try {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            return canvas.toDataURL('image/jpeg', 0.88);
-        } catch (canvasErr) {
-            console.warn('[Manga Translator] Final canvas export fallback failed:', canvasErr);
+            const bgRes = await new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    console.warn(`[Manga Translator] Background sendMessage timeout (${Math.round(requestTimeoutMs/1000)}s)`);
+                    resolve(null);
+                }, requestTimeoutMs + 3000);
+
+                try {
+                    chrome.runtime.sendMessage({
+                        action: 'translate_base64',
+                        url: `${cleanServerUrl}/translate_base64`,
+                        data: requestPayload,
+                        timeout: requestTimeoutMs
+                    }, (response) => {
+                        clearTimeout(timer);
+                        if (chrome.runtime && chrome.runtime.lastError) {
+                            console.warn('[Manga Translator] chrome.runtime.lastError:', chrome.runtime.lastError.message);
+                            resolve(null);
+                        } else {
+                            resolve(response);
+                        }
+                    });
+                } catch (sendErr) {
+                    clearTimeout(timer);
+                    resolve(null);
+                }
+            });
+
+            if (bgRes && bgRes.success && bgRes.data) {
+                return bgRes.data;
+            } else {
+                console.warn('[Manga Translator] Background translation reported error/timeout:', bgRes ? bgRes.error : 'No response');
+            }
+        } catch (bgErr) {
+            console.warn('[Manga Translator] Background proxy attempt error:', bgErr);
         }
+    }
+
+    // วิธีที่ 2: ส่งผ่าน GM_xmlhttpRequest / GM.xmlHttpRequest (สำหรับ Safari Userscripts / Tampermonkey)
+    if (isUserscriptEnvironment()) {
+        try {
+            const gmRes = await makeGmRequest({
+                method: 'POST',
+                url: `${cleanServerUrl}/translate_base64`,
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                data: JSON.stringify(requestPayload),
+                timeout: requestTimeoutMs
+            });
+
+            if (gmRes && gmRes.status >= 200 && gmRes.status < 300 && gmRes.responseText) {
+                try {
+                    return JSON.parse(gmRes.responseText);
+                } catch (err) {
+                    console.warn('[Manga Translator] Failed to parse GM response JSON:', err);
+                }
+            } else {
+                console.warn('[Manga Translator] GM translate request returned status:', gmRes ? gmRes.status : 'no response');
+            }
+        } catch (gmErr) {
+            console.warn('[Manga Translator] GM_xmlhttpRequest attempt failed:', gmErr);
+        }
+    }
+
+    // วิธีที่ 3: ส่งผ่าน fetch ตรง (กรณีเข้าถึงเซิร์ฟเวอร์ได้โดยตรง)
+    try {
+        const controller = new AbortController();
+        const fetchTimer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        const response = await fetch(`${cleanServerUrl}/translate_base64`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(requestPayload),
+            signal: controller.signal
+        });
+        clearTimeout(fetchTimer);
+
+        if (response.ok) {
+            return await response.json();
+        } else {
+            console.warn(`[Manga Translator] Server responded with status ${response.status}`);
+        }
+    } catch (fetchErr) {
+        console.warn('[Manga Translator] Direct fetch failed:', fetchErr);
     }
 
     return null;
@@ -2280,7 +2483,11 @@ async function startSingleImageTranslation(img) {
             }
         }, requestTimeoutMs + 5000);
 
-        const targetUrl = img.dataset.originalSrc || img.src;
+        const targetUrl = img.dataset.originalSrc || img.currentSrc || img.src;
+        if (!img.dataset.originalSrc) {
+            img.dataset.originalSrc = targetUrl;
+        }
+
         const base64Data = await fetchMangaImageAsBase64(targetUrl, img);
 
         if (!base64Data || !base64Data.startsWith('data:image/') || base64Data.startsWith('data:image/svg')) {
@@ -2316,104 +2523,7 @@ async function startSingleImageTranslation(img) {
             engine_mode: currentEngine
         };
 
-        let data = null;
-
-        // วิธีที่ 1: ส่งผ่าน Extension Background Service Worker (เลี่ยงปัญหา CSP, Mixed Content, Private Network 100%)
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-            try {
-                const bgRes = await new Promise((resolve) => {
-                    const timer = setTimeout(() => {
-                        console.warn(`[Manga Translator] Background sendMessage timeout (${Math.round(requestTimeoutMs/1000)}s)`);
-                        resolve(null);
-                    }, requestTimeoutMs + 3000);
-
-                    try {
-                        chrome.runtime.sendMessage({
-                            action: 'translate_base64',
-                            url: `${cleanServerUrl}/translate_base64`,
-                            data: requestPayload,
-                            timeout: requestTimeoutMs
-                        }, (response) => {
-                            clearTimeout(timer);
-                            if (chrome.runtime.lastError) {
-                                console.warn('[Manga Translator] chrome.runtime.lastError:', chrome.runtime.lastError.message);
-                                resolve(null);
-                            } else {
-                                resolve(response);
-                            }
-                        });
-                    } catch (sendErr) {
-                        clearTimeout(timer);
-                        resolve(null);
-                    }
-                });
-
-                if (bgRes && bgRes.success && bgRes.data) {
-                    data = bgRes.data;
-                } else {
-                    console.warn('[Manga Translator] Background translation reported error/timeout:', bgRes ? bgRes.error : 'No response');
-                }
-            } catch (bgErr) {
-                console.warn('[Manga Translator] Background proxy attempt error:', bgErr);
-            }
-        } else if (typeof GM_xmlhttpRequest !== 'undefined') {
-            // วิธีที่ 2: สำหรับ Tampermonkey / Userscript
-            try {
-                data = await new Promise((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new Error(`GM_xmlhttpRequest timeout (${Math.round(requestTimeoutMs/1000)}s)`)), requestTimeoutMs);
-                    GM_xmlhttpRequest({
-                        method: 'POST',
-                        url: `${cleanServerUrl}/translate_base64`,
-                        headers: { 'Content-Type': 'application/json' },
-                        data: JSON.stringify(requestPayload),
-                        timeout: requestTimeoutMs,
-                        onload: (res) => {
-                            clearTimeout(timer);
-                            if (res.status >= 200 && res.status < 300) {
-                                try {
-                                    resolve(JSON.parse(res.responseText));
-                                } catch (err) {
-                                    reject(err);
-                                }
-                            } else {
-                                reject(new Error(`Server status ${res.status}`));
-                            }
-                        },
-                        ontimeout: () => {
-                            clearTimeout(timer);
-                            reject(new Error('GM_xmlhttpRequest timed out (35s)'));
-                        },
-                        onerror: (err) => {
-                            clearTimeout(timer);
-                            reject(err);
-                        }
-                    });
-                });
-            } catch (gmErr) {
-                console.warn('[Manga Translator] GM_xmlhttpRequest attempt failed:', gmErr);
-            }
-        } else {
-            // วิธีที่ 3: ส่งผ่าน fetch ตรง (เฉพาะเมื่อไม่อยู่ใน Extension หรือ Userscript)
-            try {
-                const controller = new AbortController();
-                const fetchTimer = setTimeout(() => controller.abort(), requestTimeoutMs);
-                const response = await fetch(`${cleanServerUrl}/translate_base64`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestPayload),
-                    signal: controller.signal
-                });
-                clearTimeout(fetchTimer);
-
-                if (response.ok) {
-                    data = await response.json();
-                } else {
-                    console.warn(`[Manga Translator] Server responded with status ${response.status}`);
-                }
-            } catch (fetchErr) {
-                console.warn('[Manga Translator] Direct fetch failed:', fetchErr);
-            }
-        }
+        const data = await sendTranslationRequest(cleanServerUrl, requestPayload, requestTimeoutMs);
 
         // หากผู้ใช้สลับโมเดลหรือระบบประมวลผลระหว่างส่งคำขอ ห้ามนำผลลัพธ์ของโมเดลเก่ามาแปะทับ
         if (localStorage.getItem('manga_translation_model') !== currentModel ||
@@ -2424,8 +2534,15 @@ async function startSingleImageTranslation(img) {
         }
         
         if (data && data.image) {
-            const blobUrl = base64ToBlobUrl(data.image);
-            img.dataset.translatedSrc = blobUrl;
+            let finalSrc = data.image; // ใช้ Base64 Data URL เป็นฐานที่ปลอดภัยที่สุด
+            try {
+                const blobUrl = base64ToBlobUrl(data.image);
+                if (blobUrl) finalSrc = blobUrl;
+            } catch (blobErr) {
+                console.warn('[Manga Translator] Blob URL creation failed, using raw dataUrl:', blobErr);
+            }
+
+            img.dataset.translatedSrc = finalSrc;
             img.dataset.translatedDataUrl = data.image;
             img.dataset.mangaStatus = "translated";
             img.style.filter = "none";
@@ -2439,8 +2556,15 @@ async function startSingleImageTranslation(img) {
             // เปลี่ยนรูปในหน้าจอหากผู้ใช้เปิดใช้งานการแปล
             if (isTranslationEnabled) {
                 isInternalSrcChange = true;
-                img.src = blobUrl;
-                setTimeout(() => { isInternalSrcChange = false; }, 100);
+                img.src = finalSrc;
+                // ใน Safari หาก Blob URL ไม่โหลด ให้คืนค่าเป็น Data URL ทันที
+                if (finalSrc !== data.image) {
+                    img.addEventListener('error', () => {
+                        console.warn('[Manga Translator] Blob URL render failed on Safari, falling back to data URL');
+                        img.src = data.image;
+                    }, { once: true });
+                }
+                setTimeout(() => { isInternalSrcChange = false; }, 120);
             }
         } else {
             // หากใช้ Cloud และเกิด Timeout หรือ 502/503 จาก Cold Start
