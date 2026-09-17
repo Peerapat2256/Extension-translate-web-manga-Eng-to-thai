@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 from core.config import GEMINI_API_KEY
 from core.cache_manager import text_cache
 
@@ -142,3 +143,75 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th", prefe
                 results[i] = texts_list[i]
             
     return results
+
+def translate_manga_vision(img_pil, preferred_model=None, source_lang="en", target_lang="th"):
+    """
+    World-Class Multimodal Manga Vision Pipeline:
+    Sends the raw manga image directly to Gemini Vision to detect speech bubbles with exact 2D bounding boxes,
+    extract dialogue, and provide context-aware, studio-quality translations in a single pass.
+    """
+    client = get_gemini_client()
+    if not client:
+        return None
+
+    from core.quota_tracker import quota_tracker
+    candidate_models = quota_tracker.get_candidate_models(preferred_model=preferred_model)
+    if preferred_model and preferred_model != "auto":
+        print(f"[*] Calling Gemini Vision with preferred model: [{preferred_model}]")
+    else:
+        print(f"[*] Calling Gemini Vision with candidate order: {candidate_models[:3]}...")
+
+    prompt = f"""You are a master manga and comic translator.
+Detect every single text element in this manga page in natural reading order (top to bottom), including:
+- Speech bubbles and dialogue
+- Speaker names outside bubbles (e.g. 'MOM', 'DAD') as their own separate text boxes
+- Narrative captions, sound effects, phone chat UI, titles, and translator notes
+
+For each detected text element, output:
+1. "box_2d": [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 representing the exact tight bounding box enclosing that text element.
+2. "en": the exact, full original {source_lang.upper()} text (never omit, skip, or truncate words).
+3. "th": a natural, fluent, emotionally engaging {target_lang.upper()} translation tailored for manga dialogue.
+
+Output strictly as a JSON array of objects:
+[
+  {{"box_2d": [ymin, xmin, ymax, xmax], "en": "...", "th": "..."}}
+]
+"""
+
+    def _call_gemini_vision(model_name):
+        return client.models.generate_content(
+            model=model_name,
+            contents=[img_pil, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+
+    for model_name in candidate_models:
+        try:
+            future = _gemini_executor.submit(_call_gemini_vision, model_name)
+            response = future.result(timeout=10.0)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
+                raw_text = re.sub(r'\s*```$', '', raw_text)
+            
+            items = json.loads(raw_text)
+            if isinstance(items, list) and len(items) > 0:
+                quota_tracker.record_usage(model_name)
+                print(f"[Translator] Gemini Vision [{model_name}] extracted & translated {len(items)} bubbles successfully.")
+                return items
+        except FutureTimeoutError:
+            print(f"[Translator] Gemini Vision [{model_name}] timed out (>10s). Cascading to next model...")
+            continue
+        except Exception as e:
+            err_str = str(e)
+            quota_tracker.record_error(model_name, err_str)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print(f"[Translator] Gemini Vision [{model_name}] hit rate limit (429/RPM). Auto-cascading to next model...")
+            else:
+                print(f"[Translator] Gemini Vision [{model_name}] temporary unavailable ({e}). Cascading to next model...")
+            continue
+
+    return None
+

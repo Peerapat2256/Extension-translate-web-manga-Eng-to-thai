@@ -17,6 +17,7 @@ def inpaint_manga_page(img_bgr, dl_mask, ocr_boxes, active_bubbles=None, cd_boxe
         return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
 
     master_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+    cleaned_bgr = img_bgr.copy()
 
     # 1. Build polygon-level precision stroke mask from OCR line boxes
     if ocr_boxes:
@@ -53,20 +54,35 @@ def inpaint_manga_page(img_bgr, dl_mask, ocr_boxes, active_bubbles=None, cd_boxe
             
             bubble_envelope_mask[y1:y2, x1:x2] = 255
             
-            # For uniform speech bubbles, detect ink strokes using color difference
-            crop = img_bgr[y1:y2, x1:x2]
+            crop = cleaned_bgr[y1:y2, x1:x2]
             if crop.size > 0:
-                bg_col = np.median(crop, axis=(0, 1))
+                # Sample border of crop (avoiding edge boundaries)
+                border_pixels = []
+                if y1 > 2: border_pixels.append(crop[0, :])
+                if y2 < h_img - 2: border_pixels.append(crop[-1, :])
+                if x1 > 2: border_pixels.append(crop[:, 0])
+                if x2 < w_img - 2: border_pixels.append(crop[:, -1])
+                
+                if border_pixels:
+                    bg_col = np.median(np.concatenate(border_pixels), axis=0)
+                else:
+                    bg_col = np.median(crop, axis=(0, 1))
+                    
                 bg_lum = 0.114 * bg_col[0] + 0.587 * bg_col[1] + 0.299 * bg_col[2]
                 
-                # Verify background uniformity: real speech bubbles have low std (< 25)
-                # Prevents any leakage into complex illustrations, screentones, or character faces
                 diff_from_bg = np.linalg.norm(crop.astype(float) - bg_col, axis=-1)
                 bg_pixels = crop[diff_from_bg < 25]
                 bg_std = np.std(bg_pixels) if len(bg_pixels) > 20 else 999.0
                 
-                if bg_lum > 140 and bg_std < 25:
-                    stroke = generate_stroke_mask(crop, bg_col)
+                stroke = generate_stroke_mask(crop, bg_col)
+                # For uniform speech bubbles (bright and low variance), fill directly for 100% spotless surface
+                if bg_lum > 150 and bg_std < 24:
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                    stroke_dil = cv2.dilate(stroke, kernel, iterations=2)
+                    crop[stroke_dil > 0] = bg_col
+                    cleaned_bgr[y1:y2, x1:x2] = crop
+                    master_mask[y1:y2, x1:x2] = 0
+                else:
                     master_mask[y1:y2, x1:x2] = np.maximum(master_mask[y1:y2, x1:x2], stroke)
     elif ocr_boxes:
         pad = 8
@@ -82,11 +98,9 @@ def inpaint_manga_page(img_bgr, dl_mask, ocr_boxes, active_bubbles=None, cd_boxe
         restricted_dl_mask = cv2.bitwise_and(dl_mask, bubble_envelope_mask)
         master_mask = np.maximum(master_mask, restricted_dl_mask)
         
-    if np.sum(master_mask) == 0:
-        return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-        
-    # 4. High-quality Telea inpainting on text ink strokes
-    cleaned_bgr = cv2.inpaint(img_bgr, master_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    # 4. Telea inpainting on remaining complex/textured text strokes in master_mask
+    if np.sum(master_mask) > 0:
+        cleaned_bgr = cv2.inpaint(cleaned_bgr, master_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
     return Image.fromarray(cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB))
 
 def clean_text_region(img_pil, x_min, y_min, x_max, y_max, bg_color, text_color=None):

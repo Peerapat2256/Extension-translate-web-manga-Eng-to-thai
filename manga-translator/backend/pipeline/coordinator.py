@@ -11,7 +11,7 @@ from vision.style_extractor import extract_style_from_crop
 from inpainting.dual_cleaner import inpaint_manga_page
 from typesetter.graphic_renderer import render_manga_text
 from typesetter.thai_formatter import clean_manga_text
-from translator.gemini_engine import translate_batch_gemini
+from translator.gemini_engine import translate_batch_gemini, translate_manga_vision
 from translator.google_engine import translate_texts_google
 from translator.ollama_engine import translate_batch_ollama, unload_ollama_models
 
@@ -46,10 +46,89 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
     t0 = time.time()
     if img_pil.mode != "RGB":
         img_pil = img_pil.convert("RGB")
+    w_img, h_img = img_pil.size
     img_np = np.array(img_pil)
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+    # 1. High-Precision Gemini Multimodal Vision Pipeline (Single-pass OCR + Dialogue Translation)
+    is_gemini_mode = (not translator or translator == "gemini" or str(translator).startswith("gemini"))
+    if is_gemini_mode:
+        preferred_model = None
+        tr_str = str(translator).strip()
+        if tr_str.startswith("gemini:"):
+            preferred_model = tr_str.split(":", 1)[1].strip()
+        elif tr_str.startswith("gemini-"):
+            preferred_model = tr_str
+
+        t_v0 = time.time()
+        vision_items = translate_manga_vision(
+            img_pil,
+            preferred_model=preferred_model,
+            source_lang=source_lang,
+            target_lang=target_lang
+        )
+        t_v1 = time.time()
+
+        if vision_items and isinstance(vision_items, list) and len(vision_items) > 0:
+            print(f"[Pipeline] Gemini Vision detected & translated {len(vision_items)} dialogues in {t_v1-t_v0:.2f}s!")
+            dl_mask, dl_boxes = detect_comic_text_and_mask(img_bgr)
+            
+            active_bubbles_to_render = []
+            metadata = []
+            
+            for item in vision_items:
+                box = item.get("box_2d", [0, 0, 0, 0])
+                y1 = int(box[0] * h_img / 1000.0)
+                x1 = int(box[1] * w_img / 1000.0)
+                y2 = int(box[2] * h_img / 1000.0)
+                x2 = int(box[3] * w_img / 1000.0)
+                
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                    
+                th_text = clean_manga_text(item.get("th", ""), item.get("en", ""))
+                if not th_text or not th_text.strip():
+                    continue
+                    
+                bg_col, text_col, stroke_col, stroke_w = extract_style_from_crop(img_np, x1, y1, x2, y2)
+                
+                bub = {
+                    "x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2,
+                    "text": item.get("en", ""),
+                    "text_th": th_text,
+                    "bg_color": bg_col,
+                    "text_color": text_col,
+                    "stroke_color": stroke_col,
+                    "stroke_width": stroke_w,
+                    "angle": 0.0
+                }
+                active_bubbles_to_render.append(bub)
+                metadata.append({
+                    "box": [y1, x1, y2, x2],
+                    "text_en": item.get("en", ""),
+                    "text_th": th_text,
+                    "color": "#{:02x}{:02x}{:02x}".format(*text_col[:3]),
+                    "angle": 0.0
+                })
+                
+            if active_bubbles_to_render:
+                result_pil = inpaint_manga_page(img_bgr, dl_mask, active_bubbles_to_render, active_bubbles_to_render, dl_boxes)
+                for bub in active_bubbles_to_render:
+                    render_manga_text(
+                        result_pil,
+                        bub["x_min"], bub["y_min"], bub["x_max"], bub["y_max"],
+                        bub["text_th"],
+                        bub["text_color"],
+                        bub["stroke_color"],
+                        bub["stroke_width"],
+                        bub["angle"]
+                    )
+                print(f"[Metrics] Gemini Vision Full Pipeline Total: {time.time()-t0:.2f}s")
+                return result_pil, metadata
+        else:
+            print("[Pipeline] Gemini Vision returned empty or fallback triggered. Switching to offline OCR pipeline...")
     
-    # 1. Deep learning segmentation mask for pristine inpainting
+    # 2. Deep learning segmentation mask for offline inpainting fallback
     dl_mask, dl_boxes = detect_comic_text_and_mask(img_bgr)
     t_detect = time.time()
     
