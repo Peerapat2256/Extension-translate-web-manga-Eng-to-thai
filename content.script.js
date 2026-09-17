@@ -3,6 +3,35 @@ let isTranslationEnabled = false;
 let isTranslatingLoopRunning = false;
 let isInternalSrcChange = false;
 
+// ฟังก์ชันดึง URL เซิร์ฟเวอร์ที่ใช้อยู่ (รองรับสลับ Local 127.0.0.1 กับ Cloud Server เช่น Render)
+function getActiveServerUrl() {
+    const source = localStorage.getItem('manga_backend_source') || 'local';
+    let url = '';
+    if (source === 'cloud') {
+        url = (localStorage.getItem('manga_cloud_api_url') || '').trim();
+        if (!url) {
+            const fallback = (localStorage.getItem('manga_api_url') || '').trim();
+            if (fallback && !fallback.includes('127.0.0.1') && !fallback.includes('localhost')) {
+                url = fallback;
+            }
+        }
+        if (!url) url = 'https://your-manga-server.onrender.com';
+    } else {
+        url = (localStorage.getItem('manga_local_api_url') || '').trim();
+        if (!url) {
+            const fallback = (localStorage.getItem('manga_api_url') || '').trim();
+            if (fallback && (fallback.includes('127.0.0.1') || fallback.includes('localhost') || /^192\.168\./.test(fallback))) {
+                url = fallback;
+            }
+        }
+        if (!url) url = 'http://127.0.0.1:8000';
+    }
+    if (!/^https?:\/\//i.test(url)) {
+        url = (source === 'cloud' ? 'https://' : 'http://') + url;
+    }
+    return url.replace(/\/$/, '');
+}
+
 // ฟังก์ชันตรวจจับรูปภาพที่ไม่ใช่หน้ามังงะ (ป้ายรับบริจาค, ไอคอน, โลโก้, ป้ายโฆษณา, อวาตาร์, อีโมจิ ฯลฯ)
 function isNonMangaAsset(img) {
     if (!img) return true;
@@ -706,6 +735,18 @@ function createToggleUI() {
     `;
     settingsPanel.appendChild(engineDivider);
 
+    // ส่วนตั้งค่าแหล่งที่มาเซิร์ฟเวอร์ (Local vs Cloud Render)
+    const urlContainer = document.createElement('div');
+    urlContainer.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 8px;
+    `;
+
     const settingsTitle = document.createElement('div');
     settingsTitle.style.cssText = `
         font-size: 11px;
@@ -713,14 +754,66 @@ function createToggleUI() {
         color: #94a3b8;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        display: flex;
+        align-items: center;
+        gap: 5px;
     `;
-    settingsTitle.innerText = 'ตั้งค่าที่อยู่เซิร์ฟเวอร์ (Server Address)';
-    settingsPanel.appendChild(settingsTitle);
+    settingsTitle.innerHTML = `<span>🌐</span> เซิร์ฟเวอร์ประมวลผล (Backend Source)`;
+    urlContainer.appendChild(settingsTitle);
 
+    // แท็บสลับ Local vs Cloud
+    const sourceToggle = document.createElement('div');
+    sourceToggle.style.cssText = `
+        display: flex;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 6px;
+        padding: 2px;
+        gap: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    `;
+
+    const localBtn = document.createElement('div');
+    localBtn.style.cssText = `
+        flex: 1;
+        text-align: center;
+        padding: 5px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    localBtn.innerHTML = `🖥️ Local (ในเครื่อง)`;
+
+    const cloudBtn = document.createElement('div');
+    cloudBtn.style.cssText = `
+        flex: 1;
+        text-align: center;
+        padding: 5px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    cloudBtn.innerHTML = `☁️ Cloud (Render / URL)`;
+
+    sourceToggle.appendChild(localBtn);
+    sourceToggle.appendChild(cloudBtn);
+    urlContainer.appendChild(sourceToggle);
+
+    // Label คำอธิบาย URL
+    const urlLabel = document.createElement('div');
+    urlLabel.style.cssText = `
+        font-size: 10px;
+        color: #94a3b8;
+        line-height: 1.2;
+    `;
+    urlContainer.appendChild(urlLabel);
+
+    // กล่องพิมพ์ URL
     const ipInput = document.createElement('input');
     ipInput.type = 'text';
-    ipInput.placeholder = '192.168.1.100:8000';
-    ipInput.value = localStorage.getItem('manga_api_url') || 'http://127.0.0.1:8000';
     ipInput.style.cssText = `
         background: rgba(255, 255, 255, 0.08);
         border: 1px solid rgba(255, 255, 255, 0.15);
@@ -731,45 +824,234 @@ function createToggleUI() {
         outline: none;
         font-family: monospace;
     `;
-    settingsPanel.appendChild(ipInput);
+    urlContainer.appendChild(ipInput);
 
-    const saveBtn = document.createElement('div');
-    saveBtn.style.cssText = `
-        background: linear-gradient(135deg, #2563eb, #7c3aed);
-        color: #ffffff;
+    // แถวปุ่มทดสอบและปุ่มบันทึก
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = `
+        display: flex;
+        gap: 6px;
+    `;
+
+    const testBtn = document.createElement('div');
+    testBtn.style.cssText = `
+        flex: 1;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #e2e8f0;
         border-radius: 6px;
-        padding: 6px;
-        font-size: 11px;
+        padding: 6px 4px;
+        font-size: 10.5px;
         font-weight: 600;
         cursor: pointer;
         text-align: center;
         transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
     `;
-    saveBtn.innerText = 'บันทึก (Save)';
-    
-    saveBtn.addEventListener('mouseenter', () => {
-        saveBtn.style.transform = 'scale(1.02)';
-        saveBtn.style.boxShadow = '0 2px 8px rgba(99, 102, 241, 0.4)';
+    testBtn.innerHTML = `⚡ ตรวจสอบเชื่อมต่อ`;
+
+    const saveBtn = document.createElement('div');
+    saveBtn.style.cssText = `
+        flex: 1;
+        background: linear-gradient(135deg, #2563eb, #7c3aed);
+        color: #ffffff;
+        border-radius: 6px;
+        padding: 6px 4px;
+        font-size: 10.5px;
+        font-weight: 600;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+    `;
+    saveBtn.innerHTML = `💾 บันทึก (Save)`;
+
+    actionsRow.appendChild(testBtn);
+    actionsRow.appendChild(saveBtn);
+    urlContainer.appendChild(actionsRow);
+
+    // ป้ายแสดงผลการทดสอบ (Status Badge)
+    const statusBadge = document.createElement('div');
+    statusBadge.style.cssText = `
+        display: none;
+        font-size: 10px;
+        padding: 5px 8px;
+        border-radius: 4px;
+        text-align: center;
+        font-weight: 600;
+        line-height: 1.3;
+    `;
+    urlContainer.appendChild(statusBadge);
+
+    settingsPanel.appendChild(urlContainer);
+
+    let currentSource = localStorage.getItem('manga_backend_source') || 'local';
+    let savedLocalUrl = localStorage.getItem('manga_local_api_url') || 'http://127.0.0.1:8000';
+    let savedCloudUrl = localStorage.getItem('manga_cloud_api_url') || '';
+
+    function updateSourceUI() {
+        if (currentSource === 'cloud') {
+            cloudBtn.style.background = 'linear-gradient(135deg, #38bdf8, #2563eb)';
+            cloudBtn.style.color = '#ffffff';
+            cloudBtn.style.boxShadow = '0 2px 8px rgba(37, 99, 235, 0.4)';
+            localBtn.style.background = 'transparent';
+            localBtn.style.color = '#94a3b8';
+            localBtn.style.boxShadow = 'none';
+            
+            urlLabel.innerText = 'URL ของ Render หรือ Cloud Server (HTTPS):';
+            ipInput.placeholder = 'https://your-manga-server.onrender.com';
+            ipInput.value = savedCloudUrl || (localStorage.getItem('manga_api_url') && !localStorage.getItem('manga_api_url').includes('127.0.0.1') ? localStorage.getItem('manga_api_url') : '');
+        } else {
+            localBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+            localBtn.style.color = '#ffffff';
+            localBtn.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.4)';
+            cloudBtn.style.background = 'transparent';
+            cloudBtn.style.color = '#94a3b8';
+            cloudBtn.style.boxShadow = 'none';
+
+            urlLabel.innerText = 'URL ของเครื่องคอมพิวเตอร์ (Local IP / Port 8000):';
+            ipInput.placeholder = 'http://127.0.0.1:8000';
+            ipInput.value = savedLocalUrl;
+        }
+    }
+
+    localBtn.addEventListener('click', () => {
+        currentSource = 'local';
+        localStorage.setItem('manga_backend_source', 'local');
+        updateSourceUI();
+        statusBadge.style.display = 'none';
     });
-    saveBtn.addEventListener('mouseleave', () => {
-        saveBtn.style.transform = 'scale(1)';
-        saveBtn.style.boxShadow = 'none';
+
+    cloudBtn.addEventListener('click', () => {
+        currentSource = 'cloud';
+        localStorage.setItem('manga_backend_source', 'cloud');
+        updateSourceUI();
+        statusBadge.style.display = 'none';
     });
-    
+
+    updateSourceUI();
+
+    // ปุ่มบันทึกการตั้งค่า
     saveBtn.addEventListener('click', () => {
         let val = ipInput.value.trim();
-        if (val) {
-            localStorage.setItem('manga_api_url', val);
-            saveBtn.innerText = 'บันทึกแล้ว! (Saved)';
-            saveBtn.style.background = '#10b981';
-            setTimeout(() => {
-                saveBtn.innerText = 'บันทึก (Save)';
-                saveBtn.style.background = 'linear-gradient(135deg, #2563eb, #7c3aed)';
-                settingsPanel.style.display = 'none';
-            }, 800);
+        if (!val) {
+            val = currentSource === 'cloud' ? 'https://your-manga-server.onrender.com' : 'http://127.0.0.1:8000';
+        }
+        if (!/^https?:\/\//i.test(val)) {
+            val = (currentSource === 'cloud' ? 'https://' : 'http://') + val;
+        }
+        val = val.replace(/\/$/, '');
+
+        if (currentSource === 'cloud') {
+            savedCloudUrl = val;
+            localStorage.setItem('manga_cloud_api_url', val);
+        } else {
+            savedLocalUrl = val;
+            localStorage.setItem('manga_local_api_url', val);
+        }
+        localStorage.setItem('manga_api_url', val);
+
+        saveBtn.innerText = '✓ บันทึกแล้ว!';
+        saveBtn.style.background = '#10b981';
+        
+        fetchAndRenderGeminiQuota();
+        resetTranslations();
+        if (isTranslationEnabled) startSequentialChapterTranslation();
+
+        setTimeout(() => {
+            saveBtn.innerHTML = `💾 บันทึก (Save)`;
+            saveBtn.style.background = 'linear-gradient(135deg, #2563eb, #7c3aed)';
+            settingsPanel.style.display = 'none';
+        }, 800);
+    });
+
+    // ปุ่มทดสอบการเชื่อมต่อ (Ping)
+    testBtn.addEventListener('click', async () => {
+        statusBadge.style.display = 'block';
+        statusBadge.style.background = 'rgba(255, 255, 255, 0.08)';
+        statusBadge.style.border = '1px solid rgba(255, 255, 255, 0.15)';
+        statusBadge.style.color = '#cbd5e1';
+        statusBadge.innerText = '⏳ กำลังทดสอบเชื่อมต่อ...';
+
+        let targetUrl = ipInput.value.trim() || (currentSource === 'cloud' ? savedCloudUrl : savedLocalUrl);
+        if (!targetUrl) targetUrl = (currentSource === 'cloud' ? 'https://your-manga-server.onrender.com' : 'http://127.0.0.1:8000');
+        if (!/^https?:\/\//i.test(targetUrl)) {
+            targetUrl = (currentSource === 'cloud' ? 'https://' : 'http://') + targetUrl;
+        }
+        targetUrl = targetUrl.replace(/\/$/, '');
+
+        const tStart = Date.now();
+        let isOk = false;
+        let detail = '';
+
+        try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                const res = await new Promise(r => {
+                    chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health` }, resp => r(resp));
+                    setTimeout(() => r(null), 8000);
+                });
+                if (res && res.success && res.data) {
+                    isOk = true;
+                    detail = res.data.engine || res.data.status || 'Online';
+                }
+            }
+            if (!isOk && typeof GM_xmlhttpRequest !== 'undefined') {
+                const res = await new Promise(r => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: `${targetUrl}/health`,
+                        headers: { 'Accept': 'application/json' },
+                        timeout: 8000,
+                        onload: resp => {
+                            try { r(JSON.parse(resp.responseText)); } catch(e) { r(null); }
+                        },
+                        ontimeout: () => r(null),
+                        onerror: () => r(null)
+                    });
+                });
+                if (res && (res.status === 'ok' || res.engine)) {
+                    isOk = true;
+                    detail = res.engine || res.status || 'Online';
+                }
+            }
+            if (!isOk) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 6000);
+                const resp = await fetch(`${targetUrl}/health`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (resp.ok) {
+                    isOk = true;
+                    const json = await resp.json();
+                    detail = json.engine || json.status || 'Online';
+                }
+            }
+
+            const latency = Date.now() - tStart;
+            if (isOk) {
+                statusBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+                statusBadge.style.border = '1px solid #10b981';
+                statusBadge.style.color = '#34d399';
+                statusBadge.innerText = `🟢 เชื่อมต่อสำเร็จ! (${latency}ms) - ${detail}`;
+            } else {
+                statusBadge.style.background = 'rgba(239, 68, 68, 0.2)';
+                statusBadge.style.border = '1px solid #ef4444';
+                statusBadge.style.color = '#f87171';
+                statusBadge.innerText = `🔴 ไม่สามารถเชื่อมต่อได้ (${latency}ms) - โปรดตรวจสอบเซิร์ฟเวอร์`;
+            }
+        } catch (err) {
+            const latency = Date.now() - tStart;
+            statusBadge.style.background = 'rgba(239, 68, 68, 0.2)';
+            statusBadge.style.border = '1px solid #ef4444';
+            statusBadge.style.color = '#f87171';
+            statusBadge.innerText = `🔴 ไม่สามารถเชื่อมต่อได้ (${latency}ms): ${err.message || 'Offline'}`;
         }
     });
-    settingsPanel.appendChild(saveBtn);
 
     // เส้นคั่น
     const quotaDivider = document.createElement('div');
@@ -901,9 +1183,7 @@ function createToggleUI() {
 
     // ฟังก์ชันดึงและเรนเดอร์ข้อมูลโควต้าสด
     async function fetchAndRenderGeminiQuota() {
-        let serverUrl = (localStorage.getItem('manga_api_url') || 'http://127.0.0.1:8000').trim();
-        if (!/^https?:\/\//i.test(serverUrl)) serverUrl = 'http://' + serverUrl;
-        const targetUrl = serverUrl.replace(/\/$/, '') + '/gemini_quota';
+        const targetUrl = getActiveServerUrl() + '/gemini_quota';
 
         const refreshSvg = refreshQuotaBtn.querySelector('svg');
         if (refreshSvg) refreshSvg.style.transform = 'rotate(360deg)';
@@ -1553,13 +1833,8 @@ async function startSingleImageTranslation(img) {
             img.dataset.originalBlobUrl = base64ToBlobUrl(base64Data);
         }
 
-        // ดึง URL ที่ผู้ใช้ตั้งค่าไว้ (รองรับการรันจากมือถือชี้มาที่ IP คอมพิวเตอร์หลัก)
-        let serverUrl = localStorage.getItem('manga_api_url') || 'http://127.0.0.1:8000';
-        serverUrl = serverUrl.trim();
-        if (!/^https?:\/\//i.test(serverUrl)) {
-            serverUrl = 'http://' + serverUrl;
-        }
-        const cleanServerUrl = serverUrl.replace(/\/$/, '');
+        // ดึง URL เซิร์ฟเวอร์ที่เปิดใช้งานอยู่ (รองรับสลับ Local 127.0.0.1 หรือ Cloud บน Render)
+        const cleanServerUrl = getActiveServerUrl();
 
         // ตรวจสอบโมเดลและระบบประมวลผลก่อนส่ง
         const currentModel = localStorage.getItem('manga_translation_model') || 'gemini';
