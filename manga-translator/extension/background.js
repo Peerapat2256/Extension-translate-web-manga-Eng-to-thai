@@ -12,10 +12,11 @@ function arrayBufferToDataUrl(buffer, mimeType) {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // 1. Proxy translation API requests
+    // 1. Proxy translation API requests (รองรับ Render Cold Start สูงสุด 90 วินาที)
     if (request.action === 'translate_base64') {
+        const timeoutMs = request.timeout || 90000;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 35000);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         fetch(request.url, {
             method: 'POST',
@@ -40,7 +41,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             clearTimeout(timeoutId);
             sendResponse({ 
                 success: false, 
-                error: err.name === 'AbortError' ? 'Translation request timed out (30s)' : (err.message || 'Background network request failed') 
+                error: err.name === 'AbortError' ? `Translation request timed out (${Math.round(timeoutMs/1000)}s - Render Cold Start)` : (err.message || 'Background network request failed') 
             });
         });
 
@@ -81,10 +82,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true; // Keep message channel open for asynchronous sendResponse
     }
 
-    // 3. Proxy JSON GET requests (for /gemini_quota, healthcheck, etc.)
+    // 3. Proxy JSON GET requests (สำหรับ /health, /ping, /gemini_quota รองรับการปลุก Cold Start 65s)
     if (request.action === 'fetch_json') {
+        const timeoutMs = request.timeout || 65000;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         fetch(request.url, {
             method: 'GET',
@@ -108,7 +110,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             clearTimeout(timeoutId);
             sendResponse({ 
                 success: false, 
-                error: err.message || 'Background JSON fetch failed' 
+                error: err.name === 'AbortError' ? `Request timed out (${Math.round(timeoutMs/1000)}s - Render Cold Start)` : (err.message || 'Background JSON fetch failed') 
             });
         });
 

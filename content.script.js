@@ -32,6 +32,169 @@ function getActiveServerUrl() {
     return url.replace(/\/$/, '');
 }
 
+// ระบบป้องกัน Render.com Free-Tier หลับ (Cold Start Waker & Toast Notifier)
+let isCloudServerWakingUp = false;
+let lastCloudWarmTimestamp = 0;
+let cloudWakeToastElement = null;
+
+function showCloudStatusToast(htmlContent, type = 'info') {
+    if (!cloudWakeToastElement) {
+        cloudWakeToastElement = document.createElement('div');
+        cloudWakeToastElement.id = 'manga-cloud-toast';
+        cloudWakeToastElement.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 99999999;
+            background: rgba(15, 23, 42, 0.94);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            color: #f8fafc;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 11.5px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5), 0 0 15px rgba(56,189,248,0.25);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 330px;
+            line-height: 1.4;
+        `;
+        document.body.appendChild(cloudWakeToastElement);
+    }
+
+    cloudWakeToastElement.style.display = 'flex';
+    cloudWakeToastElement.style.opacity = '1';
+
+    let icon = '⚡';
+    let borderColor = 'rgba(56, 189, 248, 0.5)';
+    if (type === 'success') {
+        icon = '🟢';
+        borderColor = '#10b981';
+    } else if (type === 'error') {
+        icon = '🔴';
+        borderColor = '#ef4444';
+    } else if (type === 'cold_start') {
+        icon = '⏳';
+        borderColor = '#f59e0b';
+    }
+
+    cloudWakeToastElement.style.borderColor = borderColor;
+    cloudWakeToastElement.innerHTML = `<span style="font-size: 17px; flex-shrink: 0;">${icon}</span><div>${htmlContent}</div>`;
+
+    if (type === 'success' || type === 'error') {
+        setTimeout(() => {
+            if (cloudWakeToastElement) {
+                cloudWakeToastElement.style.opacity = '0';
+                setTimeout(() => { if (cloudWakeToastElement) cloudWakeToastElement.style.display = 'none'; }, 400);
+            }
+        }, type === 'success' ? 3500 : 6000);
+    }
+}
+
+async function warmUpCloudServer(force = false) {
+    const source = localStorage.getItem('manga_backend_source') || 'local';
+    if (source !== 'cloud') return true;
+
+    // หากเพิ่งเช็คความพร้อมมาไม่เกิน 8 นาที ไม่ต้องยิงซ้ำ
+    if (!force && lastCloudWarmTimestamp && (Date.now() - lastCloudWarmTimestamp < 8 * 60 * 1000)) {
+        return true;
+    }
+
+    if (isCloudServerWakingUp) return false;
+    isCloudServerWakingUp = true;
+
+    const targetUrl = getActiveServerUrl();
+    const tStart = Date.now();
+
+    // แสดง Toast แจ้งเตือนเมื่อใช้เวลาเกิน 2.2 วินาที (หมายถึง Render กำลังบูต Cold Start อยู่)
+    const slowTimer = setTimeout(() => {
+        showCloudStatusToast(
+            '<b>กำลังปลุก Cloud Server บน Render...</b><div style="font-size:10px; color:#94a3b8; margin-top:2px;">(Cold Start ~30-50 วินาที) มังงะจะเริ่มแปลอัตโนมัติทันทีที่เซิร์ฟเวอร์พร้อมครับ</div>',
+            'cold_start'
+        );
+        const mainBtnText = document.querySelector('#manga-translator-btn span:last-child');
+        if (mainBtnText && isTranslationEnabled) {
+            mainBtnText.innerText = '⏳ กำลังปลุกเซิร์ฟเวอร์ Render (~30-50s)...';
+        }
+    }, 2200);
+
+    let isOk = false;
+    let detail = '';
+
+    try {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            const res = await new Promise(r => {
+                chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health`, timeout: 65000 }, resp => r(resp));
+                setTimeout(() => r(null), 65000);
+            });
+            if (res && res.success && res.data) {
+                isOk = true;
+                detail = res.data.engine || res.data.status || 'Online';
+            }
+        }
+        if (!isOk && typeof GM_xmlhttpRequest !== 'undefined') {
+            const res = await new Promise(r => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: `${targetUrl}/health`,
+                    headers: { 'Accept': 'application/json' },
+                    timeout: 65000,
+                    onload: resp => {
+                        try { r(JSON.parse(resp.responseText)); } catch(e) { r(null); }
+                    },
+                    ontimeout: () => r(null),
+                    onerror: () => r(null)
+                });
+            });
+            if (res && (res.status === 'online' || res.status === 'ok' || res.engine)) {
+                isOk = true;
+                detail = res.engine || res.status || 'Online';
+            }
+        }
+        if (!isOk) {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 65000);
+            const resp = await fetch(`${targetUrl}/health`, { signal: controller.signal });
+            clearTimeout(tid);
+            if (resp.ok) {
+                isOk = true;
+                const json = await resp.json();
+                detail = json.engine || json.status || 'Online';
+            }
+        }
+    } catch (err) {
+        console.warn('[Manga Translator] warmUpCloudServer ping error:', err);
+    } finally {
+        clearTimeout(slowTimer);
+        isCloudServerWakingUp = false;
+    }
+
+    const elapsed = Date.now() - tStart;
+    if (isOk) {
+        lastCloudWarmTimestamp = Date.now();
+        if (elapsed > 2200) {
+            showCloudStatusToast(
+                `<b>เซิร์ฟเวอร์ Render ตื่นแล้ว! (${Math.round(elapsed / 1000)}s)</b><div style="font-size:10px; color:#86efac;">พร้อมแปลมังงะทันทีครับ</div>`,
+                'success'
+            );
+        }
+        wakeSupervisor();
+        return true;
+    } else {
+        if (elapsed > 2200) {
+            showCloudStatusToast(
+                '<b>ไม่สามารถปลุกเซิร์ฟเวอร์ได้</b><div style="font-size:10px; color:#fca5a5;">โปรดตรวจสอบ URL ของ Render หรือดูสถานะเซิร์ฟเวอร์</div>',
+                'error'
+            );
+        }
+        return false;
+    }
+}
+
 // ฟังก์ชันตรวจจับรูปภาพที่ไม่ใช่หน้ามังงะ (ป้ายรับบริจาค, ไอคอน, โลโก้, ป้ายโฆษณา, อวาตาร์, อีโมจิ ฯลฯ)
 function isNonMangaAsset(img) {
     if (!img) return true;
@@ -255,6 +418,16 @@ async function translationSupervisorLoop() {
 
     try {
         while (isTranslationEnabled) {
+            // หากเซิร์ฟเวอร์ Cloud กำลังตื่น (Cold Start) ให้รอจนกว่าจะตื่นเสร็จ เพื่อไม่ให้ส่งรูปไปค้าง
+            if (isCloudServerWakingUp) {
+                const textSpan = document.querySelector('#manga-translator-btn span:last-child');
+                if (textSpan && isTranslationEnabled) {
+                    textSpan.innerText = '⏳ กำลังปลุกเซิร์ฟเวอร์ Render (Cold Start)...';
+                }
+                await sleepOrWake(1500);
+                continue;
+            }
+
             const mangaImages = getSortedMangaImages();
             if (mangaImages.length === 0) {
                 await sleepOrWake(800);
@@ -375,6 +548,11 @@ async function startSequentialChapterTranslation() {
             }
         });
         domMutationObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // หากใช้ Cloud Server ให้เริ่มปลุกเซิร์ฟเวอร์แบบเบื้องหลังทันที
+    if (localStorage.getItem('manga_backend_source') === 'cloud') {
+        warmUpCloudServer();
     }
 
     await translationSupervisorLoop();
@@ -990,11 +1168,24 @@ function createToggleUI() {
         let isOk = false;
         let detail = '';
 
+        const isCloudTarget = (currentSource === 'cloud');
+        const testTimeout = isCloudTarget ? 65000 : 8000;
+
+        let coldTimer = null;
+        if (isCloudTarget) {
+            coldTimer = setTimeout(() => {
+                statusBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+                statusBadge.style.border = '1px solid #f59e0b';
+                statusBadge.style.color = '#fbbf24';
+                statusBadge.innerText = '⏳ กำลังปลุกเซิร์ฟเวอร์ Render (Cold Start อาจใช้เวลา 30-50 วิ)...';
+            }, 2500);
+        }
+
         try {
             if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
                 const res = await new Promise(r => {
-                    chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health` }, resp => r(resp));
-                    setTimeout(() => r(null), 8000);
+                    chrome.runtime.sendMessage({ action: 'fetch_json', url: `${targetUrl}/health`, timeout: testTimeout }, resp => r(resp));
+                    setTimeout(() => r(null), testTimeout);
                 });
                 if (res && res.success && res.data) {
                     isOk = true;
@@ -1007,7 +1198,7 @@ function createToggleUI() {
                         method: 'GET',
                         url: `${targetUrl}/health`,
                         headers: { 'Accept': 'application/json' },
-                        timeout: 8000,
+                        timeout: testTimeout,
                         onload: resp => {
                             try { r(JSON.parse(resp.responseText)); } catch(e) { r(null); }
                         },
@@ -1015,14 +1206,14 @@ function createToggleUI() {
                         onerror: () => r(null)
                     });
                 });
-                if (res && (res.status === 'ok' || res.engine)) {
+                if (res && (res.status === 'online' || res.status === 'ok' || res.engine)) {
                     isOk = true;
                     detail = res.engine || res.status || 'Online';
                 }
             }
             if (!isOk) {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 6000);
+                const timeoutId = setTimeout(() => controller.abort(), testTimeout);
                 const resp = await fetch(`${targetUrl}/health`, { signal: controller.signal });
                 clearTimeout(timeoutId);
                 if (resp.ok) {
@@ -1034,10 +1225,11 @@ function createToggleUI() {
 
             const latency = Date.now() - tStart;
             if (isOk) {
+                lastCloudWarmTimestamp = Date.now();
                 statusBadge.style.background = 'rgba(16, 185, 129, 0.2)';
                 statusBadge.style.border = '1px solid #10b981';
                 statusBadge.style.color = '#34d399';
-                statusBadge.innerText = `🟢 เชื่อมต่อสำเร็จ! (${latency}ms) - ${detail}`;
+                statusBadge.innerText = latency > 3000 ? `🟢 ปลุกเซิร์ฟเวอร์สำเร็จ! (${latency}ms) - ${detail}` : `🟢 เชื่อมต่อสำเร็จ! (${latency}ms) - ${detail}`;
             } else {
                 statusBadge.style.background = 'rgba(239, 68, 68, 0.2)';
                 statusBadge.style.border = '1px solid #ef4444';
@@ -1050,6 +1242,8 @@ function createToggleUI() {
             statusBadge.style.border = '1px solid #ef4444';
             statusBadge.style.color = '#f87171';
             statusBadge.innerText = `🔴 ไม่สามารถเชื่อมต่อได้ (${latency}ms): ${err.message || 'Offline'}`;
+        } finally {
+            if (coldTimer) clearTimeout(coldTimer);
         }
     });
 
@@ -1803,12 +1997,15 @@ async function startSingleImageTranslation(img) {
         img.style.transition = "filter 0.4s ease-in-out";
         img.style.filter = "blur(6px) grayscale(15%)";
 
-        // Watchdog Safety Timer: ปลดเบลออัตโนมัติหากเกิน 35 วินาที ป้องกันหน้าเว็บค้างเบลอถาวรเด็ดขาด
+        const isCloudSource = (localStorage.getItem('manga_backend_source') === 'cloud');
+        const requestTimeoutMs = isCloudSource ? 90000 : 35000;
+
+        // Watchdog Safety Timer: ปลดเบลออัตโนมัติหากเกินเวลา ป้องกันหน้าเว็บค้างเบลอถาวรเด็ดขาด (ยืดเวลาสำหรับ Render Cold Start)
         blurSafetyTimer = setTimeout(() => {
             if (img.dataset.mangaStatus !== "translated") {
                 img.style.filter = "none";
             }
-        }, 35000);
+        }, requestTimeoutMs + 5000);
 
         const targetUrl = img.dataset.originalSrc || img.src;
         const base64Data = await fetchMangaImageAsBase64(targetUrl, img);
@@ -1853,15 +2050,16 @@ async function startSingleImageTranslation(img) {
             try {
                 const bgRes = await new Promise((resolve) => {
                     const timer = setTimeout(() => {
-                        console.warn('[Manga Translator] Background sendMessage timeout (35s)');
+                        console.warn(`[Manga Translator] Background sendMessage timeout (${Math.round(requestTimeoutMs/1000)}s)`);
                         resolve(null);
-                    }, 35000);
+                    }, requestTimeoutMs + 3000);
 
                     try {
                         chrome.runtime.sendMessage({
                             action: 'translate_base64',
                             url: `${cleanServerUrl}/translate_base64`,
-                            data: requestPayload
+                            data: requestPayload,
+                            timeout: requestTimeoutMs
                         }, (response) => {
                             clearTimeout(timer);
                             if (chrome.runtime.lastError) {
@@ -1889,13 +2087,13 @@ async function startSingleImageTranslation(img) {
             // วิธีที่ 2: สำหรับ Tampermonkey / Userscript
             try {
                 data = await new Promise((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new Error('GM_xmlhttpRequest timeout (35s)')), 35000);
+                    const timer = setTimeout(() => reject(new Error(`GM_xmlhttpRequest timeout (${Math.round(requestTimeoutMs/1000)}s)`)), requestTimeoutMs);
                     GM_xmlhttpRequest({
                         method: 'POST',
                         url: `${cleanServerUrl}/translate_base64`,
                         headers: { 'Content-Type': 'application/json' },
                         data: JSON.stringify(requestPayload),
-                        timeout: 35000,
+                        timeout: requestTimeoutMs,
                         onload: (res) => {
                             clearTimeout(timer);
                             if (res.status >= 200 && res.status < 300) {
@@ -1925,7 +2123,7 @@ async function startSingleImageTranslation(img) {
             // วิธีที่ 3: ส่งผ่าน fetch ตรง (เฉพาะเมื่อไม่อยู่ใน Extension หรือ Userscript)
             try {
                 const controller = new AbortController();
-                const fetchTimer = setTimeout(() => controller.abort(), 35000);
+                const fetchTimer = setTimeout(() => controller.abort(), requestTimeoutMs);
                 const response = await fetch(`${cleanServerUrl}/translate_base64`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1972,6 +2170,16 @@ async function startSingleImageTranslation(img) {
                 setTimeout(() => { isInternalSrcChange = false; }, 100);
             }
         } else {
+            // หากใช้ Cloud และเกิด Timeout หรือ 502/503 จาก Cold Start
+            if (isCloudSource) {
+                console.warn('[Manga Translator] Cloud backend cold start or temporary failure. Retrying cleanly...');
+                warmUpCloudServer(true); // ปลุกเซิร์ฟเวอร์
+                img.dataset.mangaStatus = "pending"; // คืนสถานะเพื่อให้ supervisor แปลต่อเมื่อพร้อม
+                img.style.filter = "none";
+                await new Promise(r => setTimeout(r, 3000));
+                return;
+            }
+
             img.dataset.mangaStatus = "error";
             img.dataset.mangaRetryTime = Date.now().toString();
             img.dataset.mangaRetryCount = (Number(img.dataset.mangaRetryCount) || 0) + 1;
