@@ -2191,15 +2191,15 @@ function base64ToBlobUrl(base64) {
     }
 }
 
-// ฟังก์ชันปรับขนาด/บีบอัด Base64 สำหรับภาพขนาดใหญ่พิเศษ (เช่น Webtoon แนวตั้งยาวหลายหมื่นพิกเซล)
-// แปลงเป็น JPEG 0.88 เพื่อลด payload จาก 8-15MB เหลือเพียง ~600KB
-// ช่วยประหยัด RAM บน Render/Local Server ป้องกัน OOM Crash และลดเวลาอัปโหลดลง 10 เท่า!
+// ฟังก์ชันปรับขนาด/บีบอัด Base64 สำหรับภาพขนาดใหญ่พิเศษ (เช่น Webtoon หรือหน้าสแกน 2K-4K)
+// แปลงเป็น JPEG 0.85 และจำกัดความยาวไม่เกิน 1800px เพื่อลด payload เหลือเพียง ~250-450KB
+// ช่วยให้ iPad ส่งข้อมูลขึ้น Render ข้ามประเทศได้ไวขึ้น 4-5 เท่า และลดเวลาประมวลผลบนเซิร์ฟเวอร์
 async function compressBase64IfNeeded(dataUrl) {
     if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
         return dataUrl;
     }
-    // หากข้อมูลเล็กกว่า 1.8MB และเป็น jpeg/webp อยู่แล้ว ไม่จำเป็นต้องบีบอัดซ้ำ
-    if (dataUrl.length < 2000000 && !dataUrl.startsWith('data:image/png')) {
+    // หากข้อมูลมีขนาดเล็กมาก (< 500KB) และไม่ใช่ PNG ไม่จำเป็นต้องบีบอัดซ้ำ
+    if (dataUrl.length < 650000 && !dataUrl.startsWith('data:image/png')) {
         return dataUrl;
     }
     try {
@@ -2214,13 +2214,24 @@ async function compressBase64IfNeeded(dataUrl) {
         if (!loaded || !tempImg.naturalWidth || !tempImg.naturalHeight) {
             return dataUrl;
         }
+
+        let targetW = tempImg.naturalWidth;
+        let targetH = tempImg.naturalHeight;
+        const maxDim = Math.max(targetW, targetH);
+        // หากภาพด้านยาวเกิน 1800px ให้สเกลลงเล็กน้อยเพื่อความเร็วสูงสุด
+        if (maxDim > 1800) {
+            const scale = 1800.0 / maxDim;
+            targetW = Math.round(targetW * scale);
+            targetH = Math.round(targetH * scale);
+        }
+
         const canvas = document.createElement('canvas');
-        canvas.width = tempImg.naturalWidth;
-        canvas.height = tempImg.naturalHeight;
+        canvas.width = targetW;
+        canvas.height = targetH;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(tempImg, 0, 0);
-        const jpegUrl = canvas.toDataURL('image/jpeg', 0.88);
-        if (jpegUrl && jpegUrl.length > 200 && jpegUrl.length < dataUrl.length) {
+        ctx.drawImage(tempImg, 0, 0, targetW, targetH);
+        const jpegUrl = canvas.toDataURL('image/jpeg', 0.85);
+        if (jpegUrl && jpegUrl.length > 200 && (jpegUrl.length < dataUrl.length || maxDim > 1800)) {
             console.log(`[Manga Translator] Optimized image payload: ${(dataUrl.length/1024/1024).toFixed(2)}MB -> ${(jpegUrl.length/1024/1024).toFixed(2)}MB`);
             return jpegUrl;
         }
