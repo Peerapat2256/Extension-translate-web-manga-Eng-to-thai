@@ -101,6 +101,16 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                     continue
                     
                 th_text = clean_manga_text(item.get("th", ""), item.get("en", ""))
+                import re
+                if (not th_text or not th_text.strip() or th_text == "..." or not re.search(r'[\u0e00-\u0e7f]', th_text)) and item.get("en"):
+                    try:
+                        from translator.google_engine import translate_texts_google
+                        fb = translate_texts_google([item["en"]], source_lang, target_lang)
+                        if fb and fb[0] and fb[0].strip() and fb[0] != "...":
+                            th_text = clean_manga_text(fb[0], item.get("en", ""))
+                    except Exception:
+                        pass
+
                 if not th_text or not th_text.strip():
                     continue
                     
