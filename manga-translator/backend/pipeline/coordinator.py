@@ -100,6 +100,16 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                 if x2 <= x1 or y2 <= y1:
                     continue
                     
+                # Expand vision text bounds to cover speech bubble padding and background
+                h_box = y2 - y1
+                w_box = x2 - x1
+                pad_y = int(round(h_box * 0.35))
+                pad_x = int(round(w_box * 0.15))
+                y1 = max(0, y1 - pad_y)
+                y2 = min(h_img, y2 + pad_y)
+                x1 = max(0, x1 - pad_x)
+                x2 = min(w_img, x2 + pad_x)
+                    
                 th_text = clean_manga_text(item.get("th", ""), item.get("en", ""))
                 import re
                 if (not th_text or not th_text.strip() or th_text == "..." or not re.search(r'[\u0e00-\u0e7f]', th_text)) and item.get("en"):
