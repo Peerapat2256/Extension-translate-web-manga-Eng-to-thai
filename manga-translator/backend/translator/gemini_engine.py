@@ -2,7 +2,6 @@ import os
 import re
 import time
 import json
-from PIL import Image
 from core.config import GEMINI_API_KEY
 from core.cache_manager import text_cache
 
@@ -145,60 +144,10 @@ def translate_batch_gemini(texts_list, source_lang="en", target_lang="th", prefe
             
     return results
 
-def prepare_square_vision_image(img_pil):
-    w, h = img_pil.size
-    s = max(w, h)
-    bg_color = img_pil.getpixel((0, 0))
-    if isinstance(bg_color, int):
-        bg_color = (bg_color, bg_color, bg_color)
-    elif len(bg_color) == 4:
-        bg_color = bg_color[:3]
-        
-    square_img = Image.new("RGB", (s, s), bg_color)
-    pad_left = (s - w) // 2
-    pad_top = (s - h) // 2
-    square_img.paste(img_pil.convert("RGB"), (pad_left, pad_top))
-    
-    vision_input = square_img
-    if s > 1300:
-        vision_input = square_img.resize((1300, 1300), Image.Resampling.BILINEAR)
-        
-    return vision_input, s, pad_left, pad_top
-
-def unpad_and_normalize_box(box_2d, s, pad_left, pad_top, orig_w, orig_h):
-    if not isinstance(box_2d, (list, tuple)) or len(box_2d) < 4:
-        return box_2d
-    try:
-        ymin, xmin, ymax, xmax = float(box_2d[0]), float(box_2d[1]), float(box_2d[2]), float(box_2d[3])
-        
-        y1_sq = (ymin / 1000.0) * s
-        x1_sq = (xmin / 1000.0) * s
-        y2_sq = (ymax / 1000.0) * s
-        x2_sq = (xmax / 1000.0) * s
-        
-        y1 = int(round(y1_sq - pad_top))
-        x1 = int(round(x1_sq - pad_left))
-        y2 = int(round(y2_sq - pad_top))
-        x2 = int(round(x2_sq - pad_left))
-        
-        y1 = max(0, min(orig_h, y1))
-        x1 = max(0, min(orig_w, x1))
-        y2 = max(0, min(orig_h, y2))
-        x2 = max(0, min(orig_w, x2))
-        
-        norm_ymin = (y1 / float(orig_h)) * 1000.0 if orig_h > 0 else 0
-        norm_xmin = (x1 / float(orig_w)) * 1000.0 if orig_w > 0 else 0
-        norm_ymax = (y2 / float(orig_h)) * 1000.0 if orig_h > 0 else 0
-        norm_xmax = (x2 / float(orig_w)) * 1000.0 if orig_w > 0 else 0
-        
-        return [norm_ymin, norm_xmin, norm_ymax, norm_xmax]
-    except Exception:
-        return box_2d
-
 def translate_manga_vision(img_pil, preferred_model=None, source_lang="en", target_lang="th"):
     """
     World-Class Multimodal Manga Vision Pipeline:
-    Sends the square-padded manga image to Gemini Vision to detect speech bubbles with exact 2D bounding boxes,
+    Sends the raw manga image directly to Gemini Vision to detect speech bubbles with exact 2D bounding boxes,
     extract dialogue, and provide context-aware, studio-quality translations in a single pass.
     """
     client = get_gemini_client()
@@ -212,13 +161,9 @@ def translate_manga_vision(img_pil, preferred_model=None, source_lang="en", targ
     else:
         print(f"[*] Calling Gemini Vision with candidate order: {candidate_models[:3]}...")
 
-    orig_w, orig_h = img_pil.size
-    vision_img, s, pad_left, pad_top = prepare_square_vision_image(img_pil)
-
     prompt = f"""You are a master manga and comic translator.
 Detect every single text element in this manga page in natural reading order (top to bottom), including:
 - Speech bubbles and dialogue
-- Connected, chained, or overlapping caption boxes / speech bubbles (always detect and translate EACH box as its own separate item so none are missed)
 - Sub-dialogue, colored notes, italic commentary, and muttered lines inside or below speech bubbles (always detect them as their own separate items)
 - Speaker names outside bubbles (e.g. 'MOM', 'DAD') as their own separate text boxes
 - Narrative captions, sound effects, phone chat UI, titles, and translator notes
@@ -230,15 +175,14 @@ For each detected text element, output:
 
 Output strictly as a JSON array of objects:
 [
-  {{"box_2d": [100, 200, 150, 400], "en": "Look out!", "th": "ระวัง!"}}
+  {{"box_2d": [ymin, xmin, ymax, xmax], "en": "...", "th": "..."}}
 ]
-Do NOT output placeholder dots ('...').
 """
 
     def _call_gemini_vision(model_name):
         return client.models.generate_content(
             model=model_name,
-            contents=[vision_img, prompt],
+            contents=[img_pil, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
             )
@@ -275,9 +219,6 @@ Do NOT output placeholder dots ('...').
 
             if isinstance(items, list) and len(items) > 0:
                 quota_tracker.record_usage(model_name)
-                for item in items:
-                    if "box_2d" in item:
-                        item["box_2d"] = unpad_and_normalize_box(item["box_2d"], s, pad_left, pad_top, orig_w, orig_h)
                 print(f"[Translator] Gemini Vision [{model_name}] extracted & translated {len(items)} bubbles successfully.")
                 return items
         except FutureTimeoutError:

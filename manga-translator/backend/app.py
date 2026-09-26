@@ -43,8 +43,5 @@ if __name__ == "__main__":
     print("\n=======================================================")
     print("[*] WORLD-CLASS MANGA TRANSLATOR 2.0 (MODULAR ARCHITECTURE)")
     print("[*] 100% Offline OCR (CUDA) | Stroke-level Inpainting | Smart Typesetter")
-    print("[*] Chrome Extension / Tampermonkey URL:")
-    print("[*] ---> http://127.0.0.1:8000 <---")
-    print("[*] (Note: Use 127.0.0.1 or localhost in browsers. Do not use 0.0.0.0)")
     print("=======================================================\n")
     uvicorn.run(app, host="0.0.0.0", port=8000, timeout_graceful_shutdown=2)

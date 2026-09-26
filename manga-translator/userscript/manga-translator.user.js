@@ -1,15 +1,12 @@
 // ==UserScript==
-// @name         Manga & Webtoon Auto Translator (EN/KO -> TH)
+// @name         Manga Universal Translator
 // @namespace    http://tampermonkey.net/
-// @version      2.8
-// @description  แปลมังงะและเว็บตูนภาษาอังกฤษ/เกาหลี เป็นภาษาไทยอัตโนมัติ ด้วย AI (Ollama Local / Gemini Cloud)
-// @author       Peerapat2256
+// @version      2.6
+// @description  แปลภาษาภาพมังงะโดยส่งไปประมวลผลที่คอมพิวเตอร์หลัก (สำหรับ Safari iOS และโปรแกรมจัดการสคริปต์)
+// @author       Antigravity
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
-// @connect      127.0.0.1
-// @connect      localhost
-// @connect      render.com
 // @connect      *
 // @run-at       document-end
 // ==/UserScript==
@@ -48,7 +45,6 @@ function getActiveServerUrl() {
     if (!/^https?:\/\//i.test(url)) {
         url = (source === 'cloud' ? 'https://' : 'http://') + url;
     }
-    url = url.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
     return url.replace(/\/$/, '');
 }
 
@@ -508,7 +504,7 @@ async function translationSupervisorLoop() {
                     if (img.hasAttribute('loading')) img.removeAttribute('loading');
                 }
 
-                // 3. ใส่เอฟเฟกต์เบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
+                // 3. ใส่เอฟผลเบลอเฉพาะหน้าที่โหลดเสร็จแล้วและอยู่ในระยะสายตา + ถัดไป (ที่ยังไม่ได้แปล)
                 for (let i = currIdx; i < Math.min(mangaImages.length, currIdx + 5); i++) {
                     const img = mangaImages[i];
                     if (img.dataset.mangaStatus !== "translated" && img.dataset.mangaStatus !== "processing") {
@@ -1322,8 +1318,7 @@ function createToggleUI() {
 
             urlLabel.innerText = 'URL ของเครื่องคอมพิวเตอร์ (Local IP / Port 8000):';
             ipInput.placeholder = 'http://127.0.0.1:8000';
-            let localVal = savedLocalUrl || 'http://127.0.0.1:8000';
-            ipInput.value = localVal.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
+            ipInput.value = savedLocalUrl;
         }
     }
 
@@ -1352,9 +1347,7 @@ function createToggleUI() {
         if (!/^https?:\/\//i.test(val)) {
             val = (currentSource === 'cloud' ? 'https://' : 'http://') + val;
         }
-        val = val.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
         val = val.replace(/\/$/, '');
-        ipInput.value = val;
 
         if (currentSource === 'cloud') {
             savedCloudUrl = val;
@@ -1392,9 +1385,7 @@ function createToggleUI() {
         if (!/^https?:\/\//i.test(targetUrl)) {
             targetUrl = (currentSource === 'cloud' ? 'https://' : 'http://') + targetUrl;
         }
-        targetUrl = targetUrl.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
         targetUrl = targetUrl.replace(/\/$/, '');
-        ipInput.value = targetUrl;
 
         const tStart = Date.now();
         let isOk = false;

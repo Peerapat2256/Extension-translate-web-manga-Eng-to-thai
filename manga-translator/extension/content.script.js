@@ -29,7 +29,6 @@ function getActiveServerUrl() {
     if (!/^https?:\/\//i.test(url)) {
         url = (source === 'cloud' ? 'https://' : 'http://') + url;
     }
-    url = url.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
     return url.replace(/\/$/, '');
 }
 
@@ -1303,8 +1302,7 @@ function createToggleUI() {
 
             urlLabel.innerText = 'URL ของเครื่องคอมพิวเตอร์ (Local IP / Port 8000):';
             ipInput.placeholder = 'http://127.0.0.1:8000';
-            let localVal = savedLocalUrl || 'http://127.0.0.1:8000';
-            ipInput.value = localVal.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
+            ipInput.value = savedLocalUrl;
         }
     }
 
@@ -1333,9 +1331,7 @@ function createToggleUI() {
         if (!/^https?:\/\//i.test(val)) {
             val = (currentSource === 'cloud' ? 'https://' : 'http://') + val;
         }
-        val = val.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
         val = val.replace(/\/$/, '');
-        ipInput.value = val;
 
         if (currentSource === 'cloud') {
             savedCloudUrl = val;
@@ -1373,9 +1369,7 @@ function createToggleUI() {
         if (!/^https?:\/\//i.test(targetUrl)) {
             targetUrl = (currentSource === 'cloud' ? 'https://' : 'http://') + targetUrl;
         }
-        targetUrl = targetUrl.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
         targetUrl = targetUrl.replace(/\/$/, '');
-        ipInput.value = targetUrl;
 
         const tStart = Date.now();
         let isOk = false;
