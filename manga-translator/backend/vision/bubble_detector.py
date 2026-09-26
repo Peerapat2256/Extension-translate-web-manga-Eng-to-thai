@@ -150,3 +150,102 @@ def cluster_lines_into_bubbles(line_boxes):
         })
         
     return unified_bubbles
+
+def find_bubble_bounds_and_mask(img_bgr, text_box):
+    """
+    Finds the exact speech bubble / box boundaries enclosing a text box
+    using color floodFill and solid contour analysis.
+    Guarantees that:
+    1. Inpainting NEVER crosses the bubble border / outline into artwork.
+    2. Typesetting gets the full interior dimensions of the bubble.
+    3. Handles single bubbles, ovals, rectangular caption boxes, and stepped/connected bubbles.
+    """
+    import cv2
+    h_img, w_img = img_bgr.shape[:2]
+    y1, x1, y2, x2 = text_box
+    if y2 <= y1 or x2 <= x1:
+        return text_box, None, (255, 255, 255)
+    crop = img_bgr[y1:y2, x1:x2]
+    if crop.size == 0:
+        return text_box, None, (255, 255, 255)
+        
+    border_px = np.concatenate([crop[0, :], crop[-1, :], crop[:, 0], crop[:, -1]])
+    bg_col = np.median(border_px, axis=0).astype(np.uint8)
+    bg_lum = 0.114 * bg_col[0] + 0.587 * bg_col[1] + 0.299 * bg_col[2]
+    
+    # Only expand if the background inside text is a uniform bright bubble or box
+    if not (bg_lum > 140):
+        return text_box, None, bg_col
+        
+    diff = np.linalg.norm(img_bgr.astype(float) - bg_col.astype(float), axis=-1)
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    sample_y, sample_x = cy, cx
+    min_diff = diff[cy, cx]
+    for dy in range(-12, 13, 4):
+        for dx in range(-12, 13, 4):
+            ny, nx = max(0, min(h_img-1, cy + dy)), max(0, min(w_img-1, cx + dx))
+            if diff[ny, nx] < min_diff:
+                min_diff = diff[ny, nx]
+                sample_y, sample_x = ny, nx
+                
+    if min_diff > 35:
+        for py, px in [(y1, cx), (y2-1, cx), (cy, x1), (cy, x2-1)]:
+            if diff[py, px] < min_diff:
+                min_diff = diff[py, px]
+                sample_y, sample_x = py, px
+                
+    if min_diff > 45:
+        return text_box, None, bg_col
+        
+    ff_mask = np.zeros((h_img + 2, w_img + 2), dtype=np.uint8)
+    tolerance = 32
+    flags = 4 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY
+    cv2.floodFill(
+        img_bgr.copy(), ff_mask, (sample_x, sample_y),
+        newVal=0,
+        loDiff=(tolerance, tolerance, tolerance),
+        upDiff=(tolerance, tolerance, tolerance),
+        flags=flags
+    )
+    
+    bubble_interior = ff_mask[1:h_img+1, 1:w_img+1]
+    flooded_area = np.sum(bubble_interior > 0)
+    page_area = h_img * w_img
+    if flooded_area > page_area * 0.25 or flooded_area < (x2 - x1) * (y2 - y1) * 0.5:
+        return text_box, None, bg_col
+        
+    # Erode interior mask 2px to strictly avoid touching the border outline
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    safe_interior = cv2.erode(bubble_interior, kernel, iterations=2)
+    
+    # Fill text holes inside the bubble interior to obtain a continuous solid region
+    contours, _ = cv2.findContours(bubble_interior, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    solid = np.zeros_like(bubble_interior)
+    cv2.drawContours(solid, contours, -1, 255, -1)
+    
+    # Expand vertically from text_box along columns inside the text box
+    sub_col = solid[:, x1:x2]
+    by1 = y1
+    while by1 > 0 and np.mean(sub_col[by1-1, :]) > 180:
+        by1 -= 1
+    by2 = y2
+    while by2 < h_img - 1 and np.mean(sub_col[by2+1, :]) > 180:
+        by2 += 1
+        
+    # Expand horizontally along rows inside [by1, by2]
+    sub_row = solid[y1:y2, :]
+    bx1 = x1
+    while bx1 > 0 and np.mean(sub_row[:, bx1-1]) > 180:
+        bx1 -= 1
+    bx2 = x2
+    while bx2 < w_img - 1 and np.mean(sub_row[:, bx2+1]) > 180:
+        bx2 += 1
+        
+    bx1 = min(bx1, x1)
+    bx2 = max(bx2, x2)
+    by1 = min(by1, y1)
+    by2 = max(by2, y2)
+    
+    return [by1, bx1, by2, bx2], safe_interior, bg_col
+

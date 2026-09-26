@@ -100,15 +100,20 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                 if x2 <= x1 or y2 <= y1:
                     continue
                     
-                # Expand vision text bounds to cover speech bubble padding and background
-                h_box = y2 - y1
-                w_box = x2 - x1
-                pad_y = int(round(h_box * 0.35))
-                pad_x = int(round(w_box * 0.15))
-                y1 = max(0, y1 - pad_y)
-                y2 = min(h_img, y2 + pad_y)
-                x1 = max(0, x1 - pad_x)
-                x2 = min(w_img, x2 + pad_x)
+                raw_box = [y1, x1, y2, x2]
+                
+                # Find true speech bubble interior bounds without overflowing outlines
+                from vision.bubble_detector import find_bubble_bounds_and_mask
+                bubble_box, safe_interior, detected_bg = find_bubble_bounds_and_mask(img_bgr, raw_box)
+                by1, bx1, by2, bx2 = bubble_box
+                
+                # Inner padding for typesetter so font doesn't press against borders
+                inner_pad_x = max(6, int((bx2 - bx1) * 0.08))
+                inner_pad_y = max(6, int((by2 - by1) * 0.08))
+                tx1 = bx1 + inner_pad_x
+                tx2 = bx2 - inner_pad_x
+                ty1 = by1 + inner_pad_y
+                ty2 = by2 - inner_pad_y
                     
                 th_text = clean_manga_text(item.get("th", ""), item.get("en", ""))
                 import re
@@ -125,9 +130,15 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                     continue
                     
                 bg_col, text_col, stroke_col, stroke_w = extract_style_from_crop(img_np, x1, y1, x2, y2)
+                bg_lum = 0.114 * bg_col[0] + 0.587 * bg_col[1] + 0.299 * bg_col[2]
+                if bg_lum > 180:
+                    stroke_w = 0
                 
                 bub = {
-                    "x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2,
+                    "x_min": tx1, "y_min": ty1, "x_max": tx2, "y_max": ty2,
+                    "raw_box": raw_box,
+                    "bubble_box": bubble_box,
+                    "safe_interior": safe_interior,
                     "text": item.get("en", ""),
                     "text_th": th_text,
                     "bg_color": bg_col,
@@ -138,7 +149,8 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                 }
                 active_bubbles_to_render.append(bub)
                 metadata.append({
-                    "box": [y1, x1, y2, x2],
+                    "box": [ty1, tx1, ty2, tx2],
+                    "raw_box": raw_box,
                     "text_en": item.get("en", ""),
                     "text_th": th_text,
                     "color": "#{:02x}{:02x}{:02x}".format(*text_col[:3]),
@@ -146,7 +158,7 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
                 })
                 
             if active_bubbles_to_render:
-                result_pil = inpaint_manga_page(img_bgr, dl_mask, active_bubbles_to_render, active_bubbles_to_render, dl_boxes)
+                result_pil = inpaint_manga_page(img_pil, None, active_bubbles_to_render, active_bubbles_to_render)
                 for bub in active_bubbles_to_render:
                     render_manga_text(
                         result_pil,
@@ -291,8 +303,26 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
         if not th_text or not th_text.strip():
             continue
             
+        raw_box = [bub["y_min"], bub["x_min"], bub["y_max"], bub["x_max"]]
+        from vision.bubble_detector import find_bubble_bounds_and_mask
+        bubble_box, safe_interior, detected_bg = find_bubble_bounds_and_mask(img_bgr, raw_box)
+        by1, bx1, by2, bx2 = bubble_box
+        inner_pad_x = max(6, int((bx2 - bx1) * 0.08))
+        inner_pad_y = max(6, int((by2 - by1) * 0.08))
+        bub["x_min"] = bx1 + inner_pad_x
+        bub["x_max"] = bx2 - inner_pad_x
+        bub["y_min"] = by1 + inner_pad_y
+        bub["y_max"] = by2 - inner_pad_y
+        bub["raw_box"] = raw_box
+        bub["bubble_box"] = bubble_box
+        bub["safe_interior"] = safe_interior
+        bg_lum = 0.114 * bub["bg_color"][0] + 0.587 * bub["bg_color"][1] + 0.299 * bub["bg_color"][2]
+        if bg_lum > 180:
+            bub["stroke_width"] = 0
+
         metadata.append({
             "box": [bub["y_min"], bub["x_min"], bub["y_max"], bub["x_max"]],
+            "raw_box": raw_box,
             "text_en": bub["text"],
             "text_th": th_text,
             "color": "#{:02x}{:02x}{:02x}".format(*bub["text_color"]),
@@ -310,7 +340,7 @@ def process_manga_image(img_pil, source_lang="en", target_lang="th", translator=
 
     # 8. World-Class Precision Stroke Inpainting ONLY for actively translated bubbles!
     # Erases all text inside active speech bubbles while strictly protecting artwork & foreign SFX
-    result_pil = inpaint_manga_page(img_bgr, dl_mask, active_boxes_for_inpaint, active_bubbles_to_render, dl_boxes)
+    result_pil = inpaint_manga_page(img_pil, None, active_boxes_for_inpaint, active_bubbles_to_render)
     t_inpaint = time.time()
     
     # 9. Typeset (Render Thai text into each active bubble entity)

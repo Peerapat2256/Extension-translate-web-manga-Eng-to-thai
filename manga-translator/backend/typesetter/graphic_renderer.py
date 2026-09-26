@@ -3,7 +3,14 @@ from core.config import TAHOMA_BOLD_FONT, DEFAULT_THAI_FONT
 from typesetter.thai_formatter import get_optimal_thai_font
 import os
 
-FONT_PATH = TAHOMA_BOLD_FONT if os.path.exists(TAHOMA_BOLD_FONT) else DEFAULT_THAI_FONT
+_DEFAULT_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "THSarabunNew-Bold.ttf"),
+    r"C:\Windows\Fonts\THSarabunNew Bold.ttf",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Sarabun-Regular.ttf"),
+    TAHOMA_BOLD_FONT,
+    DEFAULT_THAI_FONT
+]
+FONT_PATH = next((p for p in _DEFAULT_CANDIDATES if os.path.exists(p)), DEFAULT_THAI_FONT)
 
 def render_manga_text(img_pil, x_min, y_min, x_max, y_max, text_thai, 
                       text_color, stroke_color=None, stroke_width=0, angle=0.0):
@@ -38,10 +45,11 @@ def render_manga_text(img_pil, x_min, y_min, x_max, y_max, text_thai,
         else:
             stroke_color = (255, 255, 255)
     else:
-        # Default thin 1px stroke for readability
+        # Default stroke: only for light text or when stroke_width was explicitly > 0
         lum = 0.299 * text_color[0] + 0.587 * text_color[1] + 0.114 * text_color[2]
         stroke_color = (255, 255, 255) if lum < 128 else (0, 0, 0)
-        stroke_width = 1
+        if stroke_width is None:
+            stroke_width = 0
         
     if abs(angle) > 2.5:
         # Rotated text rendering via transparent layer

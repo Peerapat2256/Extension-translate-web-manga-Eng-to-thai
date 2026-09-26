@@ -218,6 +218,7 @@ def translate_manga_vision(img_pil, preferred_model=None, source_lang="en", targ
     prompt = f"""You are a master manga and comic translator.
 Detect every single text element in this manga page in natural reading order (top to bottom), including:
 - Speech bubbles and dialogue
+- Connected, chained, or overlapping caption boxes / speech bubbles (always detect and translate EACH box as its own separate item so none are missed)
 - Sub-dialogue, colored notes, italic commentary, and muttered lines inside or below speech bubbles (always detect them as their own separate items)
 - Speaker names outside bubbles (e.g. 'MOM', 'DAD') as their own separate text boxes
 - Narrative captions, sound effects, phone chat UI, titles, and translator notes

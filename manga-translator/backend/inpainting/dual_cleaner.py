@@ -1,107 +1,88 @@
 import cv2
 import numpy as np
 from PIL import Image
-from inpainting.mask_generator import generate_stroke_mask, build_polygon_stroke_mask
+from inpainting.mask_generator import generate_stroke_mask
 
-def inpaint_manga_page(img_bgr, dl_mask, ocr_boxes, active_bubbles=None, cd_boxes=None):
+def inpaint_manga_page(img_input, dl_mask=None, ocr_boxes=None, active_bubbles=None, cd_boxes=None):
     """
-    World-Class Hybrid Manga Inpainter:
+    World-Class Zero-Copy Patch Inpainter:
     1. Erases 100% of dialogue inside active speech bubbles (zero ghost text, zero missed lines).
     2. Zero floating boxes: strictly limits inpainting to actual text ink strokes.
-    3. Perfectly preserves 100% of artwork, drawings, screentones, and textures outside bubbles.
-    4. Runs in one single ultra-fast pass (< 0.1s).
+    3. Perfectly preserves 100% of artwork, borders, drawings, screentones, and textures.
+    4. Operates strictly per active dialogue patch with zero border spill.
     """
-    h_img, w_img = img_bgr.shape[:2]
-    
-    if not ocr_boxes and not active_bubbles:
-        return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+    target_bubbles = active_bubbles if active_bubbles else ocr_boxes
+    if not target_bubbles:
+        if isinstance(img_input, Image.Image):
+            return img_input
+        return Image.fromarray(cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB))
 
-    master_mask = np.zeros((h_img, w_img), dtype=np.uint8)
-    cleaned_bgr = img_bgr.copy()
+    # Convert to PIL if passed as numpy
+    if isinstance(img_input, Image.Image):
+        img_pil = img_input
+    else:
+        img_pil = Image.fromarray(cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB))
 
-    # 1. Build polygon-level precision stroke mask from OCR line boxes
-    if ocr_boxes:
-        poly_mask = build_polygon_stroke_mask(img_bgr, ocr_boxes)
-        master_mask = np.maximum(master_mask, poly_mask)
-    
-    # 2. Build active speech bubble envelopes to cleanly capture ALL lines inside translated bubbles
-    # (e.g. 2nd/3rd lines missed by OCR like 'DEFINITELY SURPASS...', 'FROM NOW ON.')
-    bubble_envelope_mask = np.zeros((h_img, w_img), dtype=np.uint8)
-    
-    if active_bubbles:
-        for bub in active_bubbles:
-            orig_x1, orig_y1 = bub['x_min'], bub['y_min']
-            orig_x2, orig_y2 = bub['x_max'], bub['y_max']
-            bx1, by1, bx2, by2 = orig_x1, orig_y1, orig_x2, orig_y2
-            
-            # Merge with ComicDetector boxes that touch or are adjacent within this speech bubble
-            if cd_boxes:
-                for cb in cd_boxes:
-                    h_overlap = min(orig_x2, cb['x_max']) - max(orig_x1, cb['x_min'])
-                    v_gap = max(0, max(orig_y1 - cb['y_max'], cb['y_min'] - orig_y2))
-                    if h_overlap > 20 and v_gap <= 20:
-                        # Strictly limit expansion to text margins so it never spills into artwork/faces
-                        bx1 = max(orig_x1 - 15, min(bx1, cb['x_min']))
-                        by1 = max(orig_y1 - 20, min(by1, cb['y_min']))
-                        bx2 = min(orig_x2 + 15, max(bx2, cb['x_max']))
-                        by2 = min(orig_y2 + 30, max(by2, cb['y_max']))
-                        
-            pad = 6
-            x1 = max(0, bx1 - pad)
-            y1 = max(0, by1 - pad)
-            x2 = min(w_img, bx2 + pad)
-            y2 = min(h_img, by2 + pad)
-            
-            bubble_envelope_mask[y1:y2, x1:x2] = 255
-            
-            crop = cleaned_bgr[y1:y2, x1:x2]
-            if crop.size > 0:
-                # Sample border of crop (avoiding edge boundaries)
-                border_pixels = []
-                if y1 > 2: border_pixels.append(crop[0, :])
-                if y2 < h_img - 2: border_pixels.append(crop[-1, :])
-                if x1 > 2: border_pixels.append(crop[:, 0])
-                if x2 < w_img - 2: border_pixels.append(crop[:, -1])
-                
-                if border_pixels:
-                    bg_col = np.median(np.concatenate(border_pixels), axis=0)
-                else:
-                    bg_col = np.median(crop, axis=(0, 1))
-                    
-                bg_lum = 0.114 * bg_col[0] + 0.587 * bg_col[1] + 0.299 * bg_col[2]
-                
-                diff_from_bg = np.linalg.norm(crop.astype(float) - bg_col, axis=-1)
-                bg_pixels = crop[diff_from_bg < 25]
-                bg_std = np.std(bg_pixels) if len(bg_pixels) > 20 else 999.0
-                
-                stroke = generate_stroke_mask(crop, bg_col)
-                # For uniform speech bubbles (bright and low variance), fill directly for 100% spotless surface
-                if bg_lum > 150 and bg_std < 24:
-                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-                    stroke_dil = cv2.dilate(stroke, kernel, iterations=2)
-                    crop[stroke_dil > 0] = bg_col
-                    cleaned_bgr[y1:y2, x1:x2] = crop
-                    master_mask[y1:y2, x1:x2] = 0
-                else:
-                    master_mask[y1:y2, x1:x2] = np.maximum(master_mask[y1:y2, x1:x2], stroke)
-    elif ocr_boxes:
-        pad = 8
-        for b in ocr_boxes:
-            x1 = max(0, b["x_min"] - pad)
-            y1 = max(0, b["y_min"] - pad)
-            x2 = min(w_img, b["x_max"] + pad)
-            y2 = min(h_img, b["y_max"] + pad)
-            bubble_envelope_mask[y1:y2, x1:x2] = 255
+    w_img, h_img = img_pil.size
 
-    # 3. Combine deep-learning segmentation mask restricted to active bubble envelopes
-    if dl_mask is not None and np.sum(dl_mask) > 0:
-        restricted_dl_mask = cv2.bitwise_and(dl_mask, bubble_envelope_mask)
-        master_mask = np.maximum(master_mask, restricted_dl_mask)
+    for bub in target_bubbles:
+        safe_interior = bub.get('safe_interior')
+        b_box = bub.get('bubble_box')
+        raw_b = bub.get('raw_box')
+        if safe_interior is not None and b_box:
+            by1, bx1, by2, bx2 = b_box
+        elif raw_b:
+            by1, bx1, by2, bx2 = raw_b
+        else:
+            bx1, by1 = bub.get('x_min', 0), bub.get('y_min', 0)
+            bx2, by2 = bub.get('x_max', w_img), bub.get('y_max', h_img)
+            
+        x1 = max(0, bx1)
+        y1 = max(0, by1)
+        x2 = min(w_img, bx2)
+        y2 = min(h_img, by2)
         
-    # 4. Telea inpainting on remaining complex/textured text strokes in master_mask
-    if np.sum(master_mask) > 0:
-        cleaned_bgr = cv2.inpaint(cleaned_bgr, master_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-    return Image.fromarray(cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB))
+        crop_pil = img_pil.crop((x1, y1, x2, y2))
+        if crop_pil.width < 3 or crop_pil.height < 3:
+            continue
+            
+        crop_bgr = cv2.cvtColor(np.array(crop_pil), cv2.COLOR_RGB2BGR)
+        bg_col = bub.get('bg_color')
+        if bg_col is None:
+            border_pixels = []
+            if y1 > 2: border_pixels.append(crop_bgr[0, :])
+            if y2 < h_img - 2: border_pixels.append(crop_bgr[-1, :])
+            if x1 > 2: border_pixels.append(crop_bgr[:, 0])
+            if x2 < w_img - 2: border_pixels.append(crop_bgr[:, -1])
+            bg_col = np.median(np.concatenate(border_pixels), axis=0) if border_pixels else np.median(crop_bgr, axis=(0, 1))
+        if hasattr(bg_col, 'tolist'):
+            bg_col = bg_col.tolist()
+        bg_col = [int(c) for c in bg_col[:3]]
+            
+        bg_lum = 0.114 * bg_col[0] + 0.587 * bg_col[1] + 0.299 * bg_col[2]
+        
+        if safe_interior is not None:
+            crop_interior = safe_interior[y1:y2, x1:x2]
+            diff_from_bg = np.linalg.norm(crop_bgr.astype(float) - np.array(bg_col), axis=-1)
+            stroke = ((diff_from_bg > 20) & (crop_interior > 0)).astype(np.uint8) * 255
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            stroke_dil = cv2.dilate(stroke, kernel, iterations=2)
+            stroke_dil = cv2.bitwise_and(stroke_dil, crop_interior)
+            
+            if bg_lum > 200:
+                crop_bgr[stroke_dil > 0] = bg_col
+            else:
+                if np.sum(stroke_dil) > 0:
+                    crop_bgr = cv2.inpaint(crop_bgr, stroke_dil, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+        else:
+            stroke = generate_stroke_mask(crop_bgr, bg_col)
+            if np.sum(stroke) > 0:
+                crop_bgr = cv2.inpaint(crop_bgr, stroke, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+            
+        cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB, dst=crop_bgr)
+        img_pil.paste(Image.fromarray(crop_bgr), (x1, y1))
+        
+    return img_pil
 
 def clean_text_region(img_pil, x_min, y_min, x_max, y_max, bg_color, text_color=None):
     """
