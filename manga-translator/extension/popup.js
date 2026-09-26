@@ -80,10 +80,10 @@ function runPureDirectTranslation(selectedModel) {
  
                 // ดึง URL ที่ผู้ใช้ตั้งค่าไว้ (รองรับการรันจากมือถือชี้มาที่ IP คอมพิวเตอร์หลัก)
                 let serverUrl = localStorage.getItem('manga_api_url') || 'http://127.0.0.1:8000';
-                serverUrl = serverUrl.trim();
                 if (!/^https?:\/\//i.test(serverUrl)) {
                     serverUrl = 'http://' + serverUrl;
                 }
+                serverUrl = serverUrl.replace(/\/\/0\.0\.0\.0(:[0-9]+)?/, '//127.0.0.1$1');
                 const cleanServerUrl = serverUrl.replace(/\/$/, '');
 
                 // ส่งไปหา Python หลังบ้าน
